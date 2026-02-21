@@ -1,3 +1,5 @@
+// Package config provides types and functions for loading, saving, and
+// applying defaults to the .logosyncx/config.json project configuration file.
 package config
 
 import (

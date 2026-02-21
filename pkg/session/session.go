@@ -1,3 +1,6 @@
+// Package session provides types and functions for reading, writing, and
+// parsing Logosyncx session files — Markdown documents with YAML frontmatter
+// stored under .logosyncx/sessions/.
 package session
 
 import (

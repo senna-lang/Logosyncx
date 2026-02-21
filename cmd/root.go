@@ -1,3 +1,4 @@
+// Package cmd implements the logos CLI commands using the cobra framework.
 package cmd
 
 import (
