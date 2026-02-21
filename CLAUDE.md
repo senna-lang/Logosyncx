@@ -73,3 +73,8 @@ Sessions are plain markdown files with YAML frontmatter (`id`, `date`, `topic`, 
 - Build: `go build -o logos .`
 - The project is currently in the design phase — `ClaudeLogoSyncDesign.md` is the authoritative spec.
 - **Language policy: all code, comments, commit messages, issue titles/descriptions, and documentation must be written in English.**
+
+## Logosyncx
+
+Use `logos` CLI for session context management.
+Full reference: .logosyncx/USAGE.md
