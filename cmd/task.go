@@ -166,6 +166,25 @@ func runTaskLS(sessionPartial, statusStr, priorityStr, tagStr string, asJSON boo
 	}
 	store := task.NewStore(root, &cfg)
 
+	entries, err := task.ReadAllTaskIndex(root)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// Auto-rebuild: inform the user and build the index on the fly.
+			fmt.Fprintln(os.Stderr, "task-index.jsonl not found. Building index from tasks/...")
+			n, buildErr := store.RebuildTaskIndex()
+			if buildErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: %v\n", buildErr)
+			}
+			fmt.Fprintf(os.Stderr, "Done. %d tasks indexed.\n\n", n)
+			entries, err = task.ReadAllTaskIndex(root)
+			if err != nil {
+				return fmt.Errorf("read task index after rebuild: %w", err)
+			}
+		} else {
+			return fmt.Errorf("read task index: %w", err)
+		}
+	}
+
 	f := task.Filter{
 		Session:  sessionPartial,
 		Status:   task.Status(statusStr),
@@ -175,20 +194,18 @@ func runTaskLS(sessionPartial, statusStr, priorityStr, tagStr string, asJSON boo
 		f.Tags = []string{tagStr}
 	}
 
-	tasks, err := store.List(f)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
-	}
+	filtered := task.ApplyToJSON(entries, f)
+	task.SortJSONByDateDesc(filtered)
 
-	if len(tasks) == 0 {
+	if len(filtered) == 0 {
 		fmt.Println("No tasks found.")
 		return nil
 	}
 
 	if asJSON {
-		return printTaskJSON(tasks)
+		return printTaskJSON(filtered)
 	}
-	return printTaskTable(tasks)
+	return printTaskTable(filtered)
 }
 
 // --- logos task refer --------------------------------------------------------
@@ -449,33 +466,42 @@ func runTaskSearch(keyword, statusStr, tagStr string) error {
 		return nil
 	}
 
-	return printTaskTable(tasks)
+	// Convert []*task.Task to []task.TaskJSON for the shared display helpers.
+	var jsonEntries []task.TaskJSON
+	for _, t := range tasks {
+		jsonEntries = append(jsonEntries, t.ToJSON())
+	}
+	return printTaskTable(jsonEntries)
 }
 
 // --- shared output helpers ---------------------------------------------------
 
 // printTaskTable writes a human-readable tab-aligned task table to stdout.
-func printTaskTable(tasks []*task.Task) error {
+func printTaskTable(entries []task.TaskJSON) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "DATE\tTITLE\tSTATUS\tPRIORITY\tSESSION")
 	fmt.Fprintln(w, "----\t-----\t------\t--------\t-------")
-	for _, t := range tasks {
-		date := t.Date.Format("2006-01-02 15:04")
-		sess := t.Session
+	for _, e := range entries {
+		date := e.Date.Format("2006-01-02 15:04")
+		sess := e.Session
 		if sess == "" {
 			sess = "-"
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			date, t.Title, string(t.Status), string(t.Priority), sess)
+			date, e.Title, string(e.Status), string(e.Priority), sess)
 	}
 	return w.Flush()
 }
 
 // printTaskJSON writes a JSON array of TaskJSON objects to stdout.
-func printTaskJSON(tasks []*task.Task) error {
-	out := make([]task.TaskJSON, len(tasks))
-	for i, t := range tasks {
-		out[i] = t.ToJSON()
+func printTaskJSON(entries []task.TaskJSON) error {
+	// Normalise nil slices so JSON output always uses [] rather than null.
+	out := make([]task.TaskJSON, len(entries))
+	for i, e := range entries {
+		if e.Tags == nil {
+			e.Tags = []string{}
+		}
+		out[i] = e
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")

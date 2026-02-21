@@ -144,6 +144,9 @@ func (s *Store) Save(t *Task, body string) (string, error) {
 		_ = gitErr
 	}
 
+	// Best-effort index append.
+	_ = AppendTaskIndex(s.projectRoot, t.ToJSON())
+
 	return path, nil
 }
 
@@ -178,6 +181,10 @@ func (s *Store) UpdateFields(nameOrPartial string, fields map[string]string) err
 
 	path := filepath.Join(s.dir, t.Filename)
 	_ = gitutil.Add(s.projectRoot, path)
+
+	// Rebuild index to reflect the updated field values (best-effort).
+	_, _ = s.RebuildTaskIndex()
+
 	return nil
 }
 
@@ -195,6 +202,10 @@ func (s *Store) Delete(nameOrPartial string) error {
 	}
 
 	_ = gitutil.Remove(s.projectRoot, path)
+
+	// Rebuild index to remove the deleted entry (best-effort).
+	_, _ = s.RebuildTaskIndex()
+
 	return nil
 }
 

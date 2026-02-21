@@ -32,6 +32,69 @@ func Apply(tasks []*Task, f Filter) []*Task {
 	return out
 }
 
+// ApplyToJSON returns the subset of TaskJSON entries that satisfy every
+// non-zero field of f.  The original slice is not modified; a new slice is
+// returned.  This is the index-based counterpart of Apply.
+func ApplyToJSON(entries []TaskJSON, f Filter) []TaskJSON {
+	var out []TaskJSON
+	for _, e := range entries {
+		if !matchesJSONFilter(e, f) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// SortJSONByDateDesc sorts TaskJSON entries newest-first in-place.
+func SortJSONByDateDesc(entries []TaskJSON) {
+	for i := 1; i < len(entries); i++ {
+		for j := i; j > 0 && entries[j].Date.After(entries[j-1].Date); j-- {
+			entries[j], entries[j-1] = entries[j-1], entries[j]
+		}
+	}
+}
+
+// matchesJSONFilter reports whether e satisfies all active constraints in f.
+func matchesJSONFilter(e TaskJSON, f Filter) bool {
+	if f.Session != "" {
+		if !strings.Contains(strings.ToLower(e.Session), strings.ToLower(f.Session)) {
+			return false
+		}
+	}
+	if f.Status != "" {
+		if e.Status != f.Status {
+			return false
+		}
+	}
+	if f.Priority != "" {
+		if e.Priority != f.Priority {
+			return false
+		}
+	}
+	if len(f.Tags) > 0 {
+		if !hasAnyTag(e.Tags, f.Tags) {
+			return false
+		}
+	}
+	if f.Keyword != "" {
+		lower := strings.ToLower(f.Keyword)
+		titleMatch := strings.Contains(strings.ToLower(e.Title), lower)
+		excerptMatch := strings.Contains(strings.ToLower(e.Excerpt), lower)
+		tagMatch := false
+		for _, tag := range e.Tags {
+			if strings.Contains(strings.ToLower(tag), lower) {
+				tagMatch = true
+				break
+			}
+		}
+		if !titleMatch && !excerptMatch && !tagMatch {
+			return false
+		}
+	}
+	return true
+}
+
 // matchesFilter reports whether t satisfies all active constraints in f.
 func matchesFilter(t *Task, f Filter) bool {
 	if f.Session != "" {
