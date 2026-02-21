@@ -287,7 +287,7 @@ Logosyncx focuses on storing and retrieving data — the LLM decides what is rel
 | Command | Status |
 |---------|--------|
 | `logos version` | ✅ Available |
-| `logos init` | 🔧 In progress |
+| `logos init` | ✅ Available |
 | `logos save` | 🔧 In progress |
 | `logos ls` | 🔧 In progress |
 | `logos refer` | 🔧 In progress |
