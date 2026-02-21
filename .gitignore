@@ -1,1 +1,8 @@
 ClaudeLogoSyncDesign.md
+
+# Go build artifacts
+logos
+*.exe
+*.test
+*.out
+/dist/
