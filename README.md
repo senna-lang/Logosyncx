@@ -291,7 +291,7 @@ Logosyncx focuses on storing and retrieving data — the LLM decides what is rel
 | `logos save` | ✅ Available |
 | `logos ls` | ✅ Available |
 | `logos refer` | ✅ Available |
-| `logos search` | 🔧 In progress |
+| `logos search` | ✅ Available |
 | `logos status` | 📅 Planned |
 | `logos sync` | 📅 Planned |
 
