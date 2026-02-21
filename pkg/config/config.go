@@ -19,6 +19,13 @@ type SaveConfig struct {
 	SummarySections []string `json:"summary_sections"`
 }
 
+// TasksConfig holds settings related to task management.
+type TasksConfig struct {
+	DefaultStatus   string   `json:"default_status"`
+	DefaultPriority string   `json:"default_priority"`
+	SummarySections []string `json:"summary_sections"`
+}
+
 // PrivacyConfig holds settings related to privacy filtering.
 type PrivacyConfig struct {
 	FilterPatterns []string `json:"filter_patterns"`
@@ -30,6 +37,7 @@ type Config struct {
 	Project    string        `json:"project"`
 	AgentsFile string        `json:"agents_file"`
 	Save       SaveConfig    `json:"save"`
+	Tasks      TasksConfig   `json:"tasks"`
 	Privacy    PrivacyConfig `json:"privacy"`
 }
 
@@ -41,6 +49,11 @@ func Default(projectName string) Config {
 		AgentsFile: "AGENTS.md",
 		Save: SaveConfig{
 			SummarySections: []string{"Summary", "Key Decisions"},
+		},
+		Tasks: TasksConfig{
+			DefaultStatus:   "open",
+			DefaultPriority: "medium",
+			SummarySections: []string{"What", "Checklist"},
 		},
 		Privacy: PrivacyConfig{
 			FilterPatterns: []string{},
@@ -106,6 +119,15 @@ func applyDefaults(cfg *Config, projectRoot string) {
 	}
 	if len(cfg.Save.SummarySections) == 0 {
 		cfg.Save.SummarySections = []string{"Summary", "Key Decisions"}
+	}
+	if cfg.Tasks.DefaultStatus == "" {
+		cfg.Tasks.DefaultStatus = "open"
+	}
+	if cfg.Tasks.DefaultPriority == "" {
+		cfg.Tasks.DefaultPriority = "medium"
+	}
+	if len(cfg.Tasks.SummarySections) == 0 {
+		cfg.Tasks.SummarySections = []string{"What", "Checklist"}
 	}
 	if cfg.Privacy.FilterPatterns == nil {
 		cfg.Privacy.FilterPatterns = []string{}

@@ -1,0 +1,483 @@
+package cmd
+
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"text/tabwriter"
+
+	"github.com/senna-lang/logosyncx/internal/project"
+	"github.com/senna-lang/logosyncx/internal/task"
+	"github.com/senna-lang/logosyncx/pkg/config"
+	"github.com/senna-lang/logosyncx/pkg/session"
+	"github.com/spf13/cobra"
+)
+
+// --- root task command -------------------------------------------------------
+
+var taskCmd = &cobra.Command{
+	Use:   "task",
+	Short: "Manage tasks in .logosyncx/tasks/",
+	Long: `Create, list, update, and delete task files stored under
+.logosyncx/tasks/. Tasks can be linked to saved sessions and are tracked
+in git alongside session context.`,
+}
+
+func init() {
+	taskCmd.AddCommand(
+		taskCreateCmd,
+		taskLsCmd,
+		taskReferCmd,
+		taskUpdateCmd,
+		taskDeleteCmd,
+		taskSearchCmd,
+	)
+	rootCmd.AddCommand(taskCmd)
+}
+
+// --- logos task create -------------------------------------------------------
+
+var taskCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create a new task file",
+	Long: `Read a task Markdown file via --file or --stdin, auto-fill id/date,
+and save it to .logosyncx/tasks/. Optionally link it to an existing session
+with --session.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		filePath, _ := cmd.Flags().GetString("file")
+		useStdin, _ := cmd.Flags().GetBool("stdin")
+		sessionPartial, _ := cmd.Flags().GetString("session")
+		return runTaskCreate(filePath, useStdin, sessionPartial)
+	},
+}
+
+func init() {
+	taskCreateCmd.Flags().StringP("file", "f", "", "Path to the task Markdown file")
+	taskCreateCmd.Flags().Bool("stdin", false, "Read task Markdown from stdin")
+	taskCreateCmd.Flags().StringP("session", "s", "", "Partial name of the session to link (resolved by partial match)")
+}
+
+func runTaskCreate(filePath string, useStdin bool, sessionPartial string) error {
+	if filePath == "" && !useStdin {
+		return errors.New("provide --file <path> or --stdin")
+	}
+	if filePath != "" && useStdin {
+		return errors.New("--file and --stdin are mutually exclusive")
+	}
+
+	// Read raw markdown.
+	var data []byte
+	var err error
+	if useStdin {
+		data, err = io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("read stdin: %w", err)
+		}
+	} else {
+		data, err = os.ReadFile(filePath)
+		if err != nil {
+			return fmt.Errorf("read file %s: %w", filePath, err)
+		}
+	}
+
+	root, err := project.FindRoot()
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	store := task.NewStore(root, &cfg)
+
+	// Parse task.
+	t, err := task.Parse("input", data)
+	if err != nil {
+		return fmt.Errorf("parse task: %w", err)
+	}
+
+	// Validate status if provided.
+	if t.Status != "" && !task.IsValidStatus(t.Status) {
+		return fmt.Errorf("invalid status %q: must be one of open, in_progress, done, cancelled", t.Status)
+	}
+
+	// Resolve and overwrite session field if --session was supplied.
+	if sessionPartial != "" {
+		resolved, err := store.ResolveSession(sessionPartial)
+		if err != nil {
+			return fmt.Errorf("resolve session %q: %w", sessionPartial, err)
+		}
+		t.Session = resolved
+	}
+
+	// Warn but don't block on empty title.
+	if strings.TrimSpace(t.Title) == "" {
+		fmt.Fprintln(os.Stderr, "warning: frontmatter 'title' is empty — filename will use 'untitled'")
+	}
+
+	savedPath, err := store.Save(&t, t.Body)
+	if err != nil {
+		return fmt.Errorf("save task: %w", err)
+	}
+
+	fmt.Printf("✓ Created task: %s\n", savedPath)
+	fmt.Println()
+	fmt.Println("Next: commit and push to share with your team.")
+	return nil
+}
+
+// --- logos task ls -----------------------------------------------------------
+
+var taskLsCmd = &cobra.Command{
+	Use:   "ls",
+	Short: "List tasks",
+	Long: `Display a table of tasks in .logosyncx/tasks/, sorted newest first.
+Use --json for structured output suitable for agent consumption.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		sessionPartial, _ := cmd.Flags().GetString("session")
+		statusStr, _ := cmd.Flags().GetString("status")
+		priorityStr, _ := cmd.Flags().GetString("priority")
+		tagStr, _ := cmd.Flags().GetString("tag")
+		asJSON, _ := cmd.Flags().GetBool("json")
+		return runTaskLS(sessionPartial, statusStr, priorityStr, tagStr, asJSON)
+	},
+}
+
+func init() {
+	taskLsCmd.Flags().StringP("session", "s", "", "Filter by session (substring match)")
+	taskLsCmd.Flags().String("status", "", "Filter by status (open, in_progress, done, cancelled)")
+	taskLsCmd.Flags().String("priority", "", "Filter by priority (high, medium, low)")
+	taskLsCmd.Flags().StringP("tag", "t", "", "Filter by tag (exact match)")
+	taskLsCmd.Flags().Bool("json", false, "Output structured JSON (for agent consumption)")
+}
+
+func runTaskLS(sessionPartial, statusStr, priorityStr, tagStr string, asJSON bool) error {
+	root, err := project.FindRoot()
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	store := task.NewStore(root, &cfg)
+
+	f := task.Filter{
+		Session:  sessionPartial,
+		Status:   task.Status(statusStr),
+		Priority: task.Priority(priorityStr),
+	}
+	if tagStr != "" {
+		f.Tags = []string{tagStr}
+	}
+
+	tasks, err := store.List(f)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+	}
+
+	if len(tasks) == 0 {
+		fmt.Println("No tasks found.")
+		return nil
+	}
+
+	if asJSON {
+		return printTaskJSON(tasks)
+	}
+	return printTaskTable(tasks)
+}
+
+// --- logos task refer --------------------------------------------------------
+
+var taskReferCmd = &cobra.Command{
+	Use:   "refer <name>",
+	Short: "Print the content of a task file",
+	Long: `Print a task file to stdout. Use --summary to print only the sections
+listed in config.tasks.summary_sections (saves tokens). Use --with-session to
+also append the summary of the linked session.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		summary, _ := cmd.Flags().GetBool("summary")
+		withSession, _ := cmd.Flags().GetBool("with-session")
+		return runTaskRefer(args[0], summary, withSession)
+	},
+}
+
+func init() {
+	taskReferCmd.Flags().Bool("summary", false, "Print only summary sections (saves tokens)")
+	taskReferCmd.Flags().Bool("with-session", false, "Append the linked session summary")
+}
+
+func runTaskRefer(nameOrPartial string, summary, withSession bool) error {
+	root, err := project.FindRoot()
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	store := task.NewStore(root, &cfg)
+
+	t, err := store.Get(nameOrPartial)
+	if err != nil {
+		return err
+	}
+
+	if summary {
+		sections := task.ExtractSections(t.Body, cfg.Tasks.SummarySections)
+		fmt.Println(sections)
+	} else {
+		// Print frontmatter + body.
+		data, err := task.Marshal(*t)
+		if err != nil {
+			return fmt.Errorf("marshal task: %w", err)
+		}
+		fmt.Print(string(data))
+	}
+
+	if withSession && t.Session != "" {
+		fmt.Println()
+		fmt.Printf("--- linked session: %s ---\n", t.Session)
+
+		sessPath := fmt.Sprintf("%s/.logosyncx/sessions/%s", root, t.Session)
+		s, err := session.LoadFile(sessPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not load linked session %q: %v\n", t.Session, err)
+		} else {
+			sections := session.ExtractSections(s.Body, cfg.Save.SummarySections)
+			fmt.Println(sections)
+		}
+	}
+
+	return nil
+}
+
+// --- logos task update -------------------------------------------------------
+
+var taskUpdateCmd = &cobra.Command{
+	Use:   "update <name>",
+	Short: "Update task fields",
+	Long: `Update frontmatter fields of a task. Supported flags: --status,
+--priority, --assignee. Setting --status done removes the task file after
+confirmation (use --force to skip the prompt).`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		statusStr, _ := cmd.Flags().GetString("status")
+		priorityStr, _ := cmd.Flags().GetString("priority")
+		assignee, _ := cmd.Flags().GetString("assignee")
+		force, _ := cmd.Flags().GetBool("force")
+		return runTaskUpdate(args[0], statusStr, priorityStr, assignee, force)
+	},
+}
+
+func init() {
+	taskUpdateCmd.Flags().String("status", "", "New status (open, in_progress, done, cancelled)")
+	taskUpdateCmd.Flags().String("priority", "", "New priority (high, medium, low)")
+	taskUpdateCmd.Flags().String("assignee", "", "New assignee")
+	taskUpdateCmd.Flags().Bool("force", false, "Skip confirmation prompt")
+}
+
+func runTaskUpdate(nameOrPartial, statusStr, priorityStr, assignee string, force bool) error {
+	if statusStr == "" && priorityStr == "" && assignee == "" {
+		return errors.New("provide at least one of --status, --priority, or --assignee")
+	}
+
+	if statusStr != "" && !task.IsValidStatus(task.Status(statusStr)) {
+		return fmt.Errorf("invalid status %q: must be one of open, in_progress, done, cancelled", statusStr)
+	}
+	if priorityStr != "" && !task.IsValidPriority(task.Priority(priorityStr)) {
+		return fmt.Errorf("invalid priority %q: must be one of high, medium, low", priorityStr)
+	}
+
+	root, err := project.FindRoot()
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	store := task.NewStore(root, &cfg)
+
+	// Special case: --status done triggers deletion.
+	if statusStr == string(task.StatusDone) {
+		t, err := store.Get(nameOrPartial)
+		if err != nil {
+			return err
+		}
+
+		if !force {
+			fmt.Printf("Mark task %q (status: %s) as done and delete it? [y/N] ", t.Title, t.Status)
+			reader := bufio.NewReader(os.Stdin)
+			answer, _ := reader.ReadString('\n')
+			answer = strings.TrimSpace(strings.ToLower(answer))
+			if answer != "y" && answer != "yes" {
+				fmt.Println("Aborted.")
+				return nil
+			}
+		}
+
+		if err := store.Delete(t.Filename); err != nil {
+			return fmt.Errorf("delete task: %w", err)
+		}
+		fmt.Printf("✓ Task %q marked done and deleted.\n", t.Title)
+		return nil
+	}
+
+	// Normal update.
+	fields := make(map[string]string)
+	if statusStr != "" {
+		fields["status"] = statusStr
+	}
+	if priorityStr != "" {
+		fields["priority"] = priorityStr
+	}
+	if assignee != "" {
+		fields["assignee"] = assignee
+	}
+
+	if err := store.UpdateFields(nameOrPartial, fields); err != nil {
+		return fmt.Errorf("update task: %w", err)
+	}
+	fmt.Printf("✓ Updated task %q.\n", nameOrPartial)
+	return nil
+}
+
+// --- logos task delete -------------------------------------------------------
+
+var taskDeleteCmd = &cobra.Command{
+	Use:   "delete <name>",
+	Short: "Delete a task file",
+	Long: `Delete a task file from .logosyncx/tasks/. A confirmation prompt is
+shown unless --force is passed.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		force, _ := cmd.Flags().GetBool("force")
+		return runTaskDelete(args[0], force)
+	},
+}
+
+func init() {
+	taskDeleteCmd.Flags().Bool("force", false, "Skip confirmation prompt")
+}
+
+func runTaskDelete(nameOrPartial string, force bool) error {
+	root, err := project.FindRoot()
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	store := task.NewStore(root, &cfg)
+
+	t, err := store.Get(nameOrPartial)
+	if err != nil {
+		return err
+	}
+
+	if !force {
+		fmt.Printf("Delete task %q (status: %s)? [y/N] ", t.Title, t.Status)
+		reader := bufio.NewReader(os.Stdin)
+		answer, _ := reader.ReadString('\n')
+		answer = strings.TrimSpace(strings.ToLower(answer))
+		if answer != "y" && answer != "yes" {
+			fmt.Println("Aborted.")
+			return nil
+		}
+	}
+
+	if err := store.Delete(t.Filename); err != nil {
+		return fmt.Errorf("delete task: %w", err)
+	}
+	fmt.Printf("✓ Deleted task %q.\n", t.Title)
+	return nil
+}
+
+// --- logos task search -------------------------------------------------------
+
+var taskSearchCmd = &cobra.Command{
+	Use:   "search <keyword>",
+	Short: "Keyword search across task title, tags, and excerpt",
+	Long: `Case-insensitive keyword search across the title, tags, and excerpt
+(## What section) of every task. Optionally pre-filter by --status or --tag.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		statusStr, _ := cmd.Flags().GetString("status")
+		tagStr, _ := cmd.Flags().GetString("tag")
+		return runTaskSearch(args[0], statusStr, tagStr)
+	},
+}
+
+func init() {
+	taskSearchCmd.Flags().String("status", "", "Pre-filter by status before keyword match")
+	taskSearchCmd.Flags().StringP("tag", "t", "", "Pre-filter by tag before keyword match")
+}
+
+func runTaskSearch(keyword, statusStr, tagStr string) error {
+	root, err := project.FindRoot()
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	store := task.NewStore(root, &cfg)
+
+	f := task.Filter{
+		Status:  task.Status(statusStr),
+		Keyword: keyword,
+	}
+	if tagStr != "" {
+		f.Tags = []string{tagStr}
+	}
+
+	tasks, err := store.List(f)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+	}
+
+	if len(tasks) == 0 {
+		fmt.Println("No tasks found.")
+		return nil
+	}
+
+	return printTaskTable(tasks)
+}
+
+// --- shared output helpers ---------------------------------------------------
+
+// printTaskTable writes a human-readable tab-aligned task table to stdout.
+func printTaskTable(tasks []*task.Task) error {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "DATE\tTITLE\tSTATUS\tPRIORITY\tSESSION")
+	fmt.Fprintln(w, "----\t-----\t------\t--------\t-------")
+	for _, t := range tasks {
+		date := t.Date.Format("2006-01-02 15:04")
+		sess := t.Session
+		if sess == "" {
+			sess = "-"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+			date, t.Title, string(t.Status), string(t.Priority), sess)
+	}
+	return w.Flush()
+}
+
+// printTaskJSON writes a JSON array of TaskJSON objects to stdout.
+func printTaskJSON(tasks []*task.Task) error {
+	out := make([]task.TaskJSON, len(tasks))
+	for i, t := range tasks {
+		out[i] = t.ToJSON()
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
+}

@@ -100,6 +100,31 @@ related: []
 <!-- Paste the conversation log here (optional) -->
 `
 
+// taskTemplateMD is the default task template written to .logosyncx/task-template.md.
+const taskTemplateMD = `---
+id: {{id}}
+date: {{date}}
+title: {{title}}
+status: open
+priority: medium
+session: {{session}}
+tags: []
+assignee:
+---
+
+## What
+
+## Why
+
+## Scope
+
+## Checklist
+
+- [ ]
+
+## Notes
+`
+
 // agentsLine is appended to AGENTS.md (or CLAUDE.md) by logos init.
 const agentsLine = "\n## Logosyncx\n\nUse `logos` CLI for session context management.\nFull reference: .logosyncx/USAGE.md\n"
 
@@ -137,6 +162,11 @@ func runInit() error {
 		return fmt.Errorf("create sessions directory: %w", err)
 	}
 
+	tasksDir := filepath.Join(logosyncxDir, "tasks")
+	if err := os.MkdirAll(tasksDir, 0o755); err != nil {
+		return fmt.Errorf("create tasks directory: %w", err)
+	}
+
 	// 2. Write config.json with defaults.
 	projectName := filepath.Base(cwd)
 	cfg := config.Default(projectName)
@@ -161,7 +191,13 @@ func runInit() error {
 		return fmt.Errorf("write template.md: %w", err)
 	}
 
-	// 5. Append reference line to agents file.
+	// 5. Write task-template.md.
+	taskTemplatePath := filepath.Join(logosyncxDir, "task-template.md")
+	if err := os.WriteFile(taskTemplatePath, []byte(taskTemplateMD), 0o644); err != nil {
+		return fmt.Errorf("write task-template.md: %w", err)
+	}
+
+	// 6. Append reference line to agents file.
 	agentsPath := filepath.Join(cwd, agentsFile)
 	if err := appendAgentsLine(agentsPath); err != nil {
 		return fmt.Errorf("update %s: %w", agentsFile, err)
@@ -172,7 +208,9 @@ func runInit() error {
 	fmt.Printf("  Created  .logosyncx/config.json\n")
 	fmt.Printf("  Created  .logosyncx/USAGE.md\n")
 	fmt.Printf("  Created  .logosyncx/template.md\n")
+	fmt.Printf("  Created  .logosyncx/task-template.md\n")
 	fmt.Printf("  Created  .logosyncx/sessions/\n")
+	fmt.Printf("  Created  .logosyncx/tasks/\n")
 	fmt.Printf("  Updated  %s\n", agentsFile)
 	fmt.Println()
 	fmt.Println("Next steps:")
