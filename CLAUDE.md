@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Logosyncx** is a Go CLI tool (`logos`) for managing AI agent conversation context in git repositories. It lets agents save, search, and retrieve past session summaries — enabling team-wide context sharing without external databases or embedding servers.
 
-The full design spec is in `Claude Logo Sync Design.md`.
+The full design spec is in `ClaudeLogoSyncDesign.md`.
 
 ## Issue Tracking
 
@@ -71,4 +71,5 @@ Sessions are plain markdown files with YAML frontmatter (`id`, `date`, `topic`, 
 - This is a **Go** project. Follow Go conventions (not the TypeScript/TDD rules in the global CLAUDE.md).
 - Tests: use `go test ./...`
 - Build: `go build -o logos .`
-- The project is currently in the design phase — `Claude Logo Sync Design.md` is the authoritative spec.
+- The project is currently in the design phase — `ClaudeLogoSyncDesign.md` is the authoritative spec.
+- **Language policy: all code, comments, commit messages, issue titles/descriptions, and documentation must be written in English.**
