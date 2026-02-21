@@ -14,6 +14,7 @@ import (
 	"github.com/senna-lang/logosyncx/internal/gitutil"
 	"github.com/senna-lang/logosyncx/internal/project"
 	"github.com/senna-lang/logosyncx/pkg/config"
+	"github.com/senna-lang/logosyncx/pkg/index"
 	"github.com/senna-lang/logosyncx/pkg/session"
 	"github.com/spf13/cobra"
 )
@@ -107,10 +108,27 @@ func runSave(filePath string, useStdin bool) error {
 
 	fmt.Printf("✓ Saved session to %s\n", savedPath)
 
-	// Stage the file with git add (best-effort).
-	if err := gitutil.Add(root, savedPath); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: git add failed (%v) — stage the file manually\n", err)
+	// Update the session index (append-only, best-effort).
+	// Reload the saved session so Filename and Excerpt are populated from disk.
+	savedSession, loadErr := session.LoadFile(savedPath)
+	if loadErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not load saved session for indexing (%v)\n", loadErr)
 	} else {
+		if indexErr := index.Append(root, index.FromSession(savedSession)); indexErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not update index (%v) — run `logos sync` to rebuild\n", indexErr)
+		}
+	}
+
+	// Stage both the session file and the index with git add (best-effort).
+	filesToStage := []string{savedPath, index.FilePath(root)}
+	allStaged := true
+	for _, f := range filesToStage {
+		if err := gitutil.Add(root, f); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: git add failed for %s (%v) — stage the file manually\n", f, err)
+			allStaged = false
+		}
+	}
+	if allStaged {
 		fmt.Println("✓ Staged with git add")
 	}
 

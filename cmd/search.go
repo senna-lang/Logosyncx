@@ -1,13 +1,13 @@
-// Package cmd implements the logos CLI commands using the cobra framework.
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/senna-lang/logosyncx/internal/project"
-	"github.com/senna-lang/logosyncx/pkg/session"
+	"github.com/senna-lang/logosyncx/pkg/index"
 	"github.com/spf13/cobra"
 )
 
@@ -41,56 +41,69 @@ func runSearch(keyword, tag string) error {
 		return err
 	}
 
-	sessions, err := session.LoadAll(root)
+	entries, err := index.ReadAll(root)
 	if err != nil {
-		// Non-fatal parse errors: warn but continue with what we have.
-		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+		if errors.Is(err, os.ErrNotExist) {
+			// Auto-rebuild: inform the user and build the index on the fly.
+			fmt.Fprintln(os.Stderr, "index.jsonl not found. Building index from sessions/...")
+			n, buildErr := index.Rebuild(root)
+			if buildErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: %v\n", buildErr)
+			}
+			fmt.Fprintf(os.Stderr, "Done. %d sessions indexed.\n\n", n)
+			entries, err = index.ReadAll(root)
+			if err != nil {
+				return fmt.Errorf("read index after rebuild: %w", err)
+			}
+		} else {
+			return fmt.Errorf("read index: %w", err)
+		}
 	}
 
 	// Apply --tag pre-filter.
 	if tag != "" {
-		sessions = filterTag(sessions, tag)
+		entries = filterTag(entries, tag)
 	}
 
 	// Apply keyword filter.
-	sessions = filterKeyword(sessions, keyword)
+	entries = filterKeyword(entries, keyword)
 
 	// Sort newest first.
-	sortByDateDesc(sessions)
+	sortByDateDesc(entries)
 
-	if len(sessions) == 0 {
+	if len(entries) == 0 {
 		fmt.Println("No sessions found.")
 		return nil
 	}
 
-	return printTable(sessions)
+	return printTable(entries)
 }
 
-// filterKeyword returns sessions whose topic, any tag, or excerpt contains
+// filterKeyword returns entries whose topic, any tag, or excerpt contains
 // keyword (case-insensitive substring match).
-func filterKeyword(sessions []session.Session, keyword string) []session.Session {
+func filterKeyword(entries []index.Entry, keyword string) []index.Entry {
 	lower := strings.ToLower(keyword)
-	var out []session.Session
-	for _, s := range sessions {
-		if sessionMatchesKeyword(s, lower) {
-			out = append(out, s)
+	var out []index.Entry
+	for _, e := range entries {
+		if entryMatchesKeyword(e, lower) {
+			out = append(out, e)
 		}
 	}
 	return out
 }
 
-// sessionMatchesKeyword reports whether s contains lower (already lowercased)
+// entryMatchesKeyword reports whether e contains lower (already lowercased)
 // in its topic, any of its tags, or its excerpt.
-func sessionMatchesKeyword(s session.Session, lower string) bool {
-	if strings.Contains(strings.ToLower(s.Topic), lower) {
+func entryMatchesKeyword(e index.Entry, lower string) bool {
+	if strings.Contains(strings.ToLower(e.Topic), lower) {
 		return true
 	}
-	for _, t := range s.Tags {
+	for _, t := range e.Tags {
 		if strings.Contains(strings.ToLower(t), lower) {
 			return true
 		}
 	}
-	if strings.Contains(strings.ToLower(s.Excerpt), lower) {
+	if strings.Contains(strings.ToLower(e.Excerpt), lower) {
 		return true
 	}
 	return false

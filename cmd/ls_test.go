@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/senna-lang/logosyncx/pkg/index"
 	"github.com/senna-lang/logosyncx/pkg/session"
 )
 
@@ -212,7 +213,7 @@ func TestLS_JSON_ValidJSON(t *testing.T) {
 		}
 	})
 
-	var result []lsJSONOutput
+	var result []index.Entry
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatalf("output is not valid JSON: %v\noutput: %q", err, out)
 	}
@@ -230,7 +231,7 @@ func TestLS_JSON_ContainsRequiredFields(t *testing.T) {
 		}
 	})
 
-	var result []lsJSONOutput
+	var result []index.Entry
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -265,7 +266,7 @@ func TestLS_JSON_TagsNeverNull(t *testing.T) {
 		}
 	})
 
-	var result []lsJSONOutput
+	var result []index.Entry
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -286,7 +287,7 @@ func TestLS_JSON_RelatedNeverNull(t *testing.T) {
 		}
 	})
 
-	var result []lsJSONOutput
+	var result []index.Entry
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -432,37 +433,37 @@ func TestLS_SortedNewestFirst(t *testing.T) {
 // --- sortByDateDesc ----------------------------------------------------------
 
 func TestSortByDateDesc_Basic(t *testing.T) {
-	sessions := []session.Session{
+	entries := []index.Entry{
 		{Topic: "a", Date: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)},
 		{Topic: "c", Date: time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)},
 		{Topic: "b", Date: time.Date(2025, 2, 1, 0, 0, 0, 0, time.UTC)},
 	}
-	sortByDateDesc(sessions)
+	sortByDateDesc(entries)
 
-	if sessions[0].Topic != "c" || sessions[1].Topic != "b" || sessions[2].Topic != "a" {
-		t.Errorf("sort order wrong: got %v %v %v", sessions[0].Topic, sessions[1].Topic, sessions[2].Topic)
+	if entries[0].Topic != "c" || entries[1].Topic != "b" || entries[2].Topic != "a" {
+		t.Errorf("sort order wrong: got %v %v %v", entries[0].Topic, entries[1].Topic, entries[2].Topic)
 	}
 }
 
 func TestSortByDateDesc_AlreadySorted(t *testing.T) {
-	sessions := []session.Session{
+	entries := []index.Entry{
 		{Topic: "c", Date: time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)},
 		{Topic: "b", Date: time.Date(2025, 2, 1, 0, 0, 0, 0, time.UTC)},
 		{Topic: "a", Date: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)},
 	}
-	sortByDateDesc(sessions)
+	sortByDateDesc(entries)
 
-	if sessions[0].Topic != "c" {
-		t.Errorf("first should be 'c', got %q", sessions[0].Topic)
+	if entries[0].Topic != "c" {
+		t.Errorf("first should be 'c', got %q", entries[0].Topic)
 	}
 }
 
 func TestSortByDateDesc_SingleElement(t *testing.T) {
-	sessions := []session.Session{
+	entries := []index.Entry{
 		{Topic: "only", Date: time.Now()},
 	}
-	sortByDateDesc(sessions) // should not panic
-	if sessions[0].Topic != "only" {
+	sortByDateDesc(entries) // should not panic
+	if entries[0].Topic != "only" {
 		t.Error("single element sort changed the element")
 	}
 }
@@ -500,22 +501,22 @@ func TestJoinTags_Multiple(t *testing.T) {
 // --- filterTag ---------------------------------------------------------------
 
 func TestFilterTag_ReturnsMatchingOnly(t *testing.T) {
-	sessions := []session.Session{
+	entries := []index.Entry{
 		{Topic: "a", Tags: []string{"auth", "jwt"}},
 		{Topic: "b", Tags: []string{"postgres"}},
 		{Topic: "c", Tags: []string{"auth"}},
 	}
-	got := filterTag(sessions, "auth")
+	got := filterTag(entries, "auth")
 	if len(got) != 2 {
 		t.Fatalf("expected 2 matches, got %d", len(got))
 	}
 }
 
 func TestFilterTag_NoMatch(t *testing.T) {
-	sessions := []session.Session{
+	entries := []index.Entry{
 		{Topic: "a", Tags: []string{"auth"}},
 	}
-	got := filterTag(sessions, "postgres")
+	got := filterTag(entries, "postgres")
 	if len(got) != 0 {
 		t.Errorf("expected 0 matches, got %d", len(got))
 	}
@@ -525,17 +526,17 @@ func TestFilterTag_NoMatch(t *testing.T) {
 
 func TestFilterSince_IncludesBoundary(t *testing.T) {
 	boundary := time.Date(2025, 2, 1, 0, 0, 0, 0, time.UTC)
-	sessions := []session.Session{
+	entries := []index.Entry{
 		{Topic: "on", Date: boundary},
 		{Topic: "after", Date: boundary.Add(24 * time.Hour)},
 		{Topic: "before", Date: boundary.Add(-24 * time.Hour)},
 	}
-	got := filterSince(sessions, boundary)
+	got := filterSince(entries, boundary)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 sessions (on + after), got %d", len(got))
 	}
-	for _, s := range got {
-		if s.Topic == "before" {
+	for _, e := range got {
+		if e.Topic == "before" {
 			t.Error("'before' session should not be included")
 		}
 	}

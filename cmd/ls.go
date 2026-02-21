@@ -2,27 +2,16 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"text/tabwriter"
 	"time"
 
 	"github.com/senna-lang/logosyncx/internal/project"
-	"github.com/senna-lang/logosyncx/pkg/session"
+	"github.com/senna-lang/logosyncx/pkg/index"
 	"github.com/spf13/cobra"
 )
-
-// lsJSONOutput is the JSON shape returned by logos ls --json.
-type lsJSONOutput struct {
-	ID       string    `json:"id"`
-	Filename string    `json:"filename"`
-	Date     time.Time `json:"date"`
-	Topic    string    `json:"topic"`
-	Tags     []string  `json:"tags"`
-	Agent    string    `json:"agent"`
-	Related  []string  `json:"related"`
-	Excerpt  string    `json:"excerpt"`
-}
 
 var lsCmd = &cobra.Command{
 	Use:   "ls",
@@ -52,10 +41,23 @@ func runLS(tag, since string, asJSON bool) error {
 		return err
 	}
 
-	sessions, err := session.LoadAll(root)
+	entries, err := index.ReadAll(root)
 	if err != nil {
-		// Non-fatal parse errors: print a warning but continue with what we have.
-		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+		if errors.Is(err, os.ErrNotExist) {
+			// Auto-rebuild: inform the user and build the index on the fly.
+			fmt.Fprintln(os.Stderr, "index.jsonl not found. Building index from sessions/...")
+			n, buildErr := index.Rebuild(root)
+			if buildErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: %v\n", buildErr)
+			}
+			fmt.Fprintf(os.Stderr, "Done. %d sessions indexed.\n\n", n)
+			entries, err = index.ReadAll(root)
+			if err != nil {
+				return fmt.Errorf("read index after rebuild: %w", err)
+			}
+		} else {
+			return fmt.Errorf("read index: %w", err)
+		}
 	}
 
 	// Apply --since filter.
@@ -64,63 +66,53 @@ func runLS(tag, since string, asJSON bool) error {
 		if err != nil {
 			return fmt.Errorf("invalid --since date %q: expected YYYY-MM-DD", since)
 		}
-		sessions = filterSince(sessions, sinceTime)
+		entries = filterSince(entries, sinceTime)
 	}
 
 	// Apply --tag filter.
 	if tag != "" {
-		sessions = filterTag(sessions, tag)
+		entries = filterTag(entries, tag)
 	}
 
 	// Sort newest first.
-	sortByDateDesc(sessions)
+	sortByDateDesc(entries)
 
-	if len(sessions) == 0 {
+	if len(entries) == 0 {
 		fmt.Println("No sessions found.")
 		return nil
 	}
 
 	if asJSON {
-		return printJSON(sessions)
+		return printJSON(entries)
 	}
-	return printTable(sessions)
+	return printTable(entries)
 }
 
 // printTable writes a human-readable tab-aligned table to stdout.
-func printTable(sessions []session.Session) error {
+func printTable(entries []index.Entry) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "DATE\tTOPIC\tTAGS")
 	fmt.Fprintln(w, "----\t-----\t----")
-	for _, s := range sessions {
-		date := s.Date.Format("2006-01-02 15:04")
-		tags := joinTags(s.Tags)
-		fmt.Fprintf(w, "%s\t%s\t%s\n", date, s.Topic, tags)
+	for _, e := range entries {
+		date := e.Date.Format("2006-01-02 15:04")
+		tags := joinTags(e.Tags)
+		fmt.Fprintf(w, "%s\t%s\t%s\n", date, e.Topic, tags)
 	}
 	return w.Flush()
 }
 
-// printJSON writes the sessions as a JSON array to stdout.
-func printJSON(sessions []session.Session) error {
-	out := make([]lsJSONOutput, len(sessions))
-	for i, s := range sessions {
-		tags := s.Tags
-		if tags == nil {
-			tags = []string{}
+// printJSON writes the entries as a JSON array to stdout.
+func printJSON(entries []index.Entry) error {
+	// Normalise nil slices so JSON output always uses [] rather than null.
+	out := make([]index.Entry, len(entries))
+	for i, e := range entries {
+		if e.Tags == nil {
+			e.Tags = []string{}
 		}
-		related := s.Related
-		if related == nil {
-			related = []string{}
+		if e.Related == nil {
+			e.Related = []string{}
 		}
-		out[i] = lsJSONOutput{
-			ID:       s.ID,
-			Filename: s.Filename,
-			Date:     s.Date,
-			Topic:    s.Topic,
-			Tags:     tags,
-			Agent:    s.Agent,
-			Related:  related,
-			Excerpt:  s.Excerpt,
-		}
+		out[i] = e
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
@@ -129,25 +121,25 @@ func printJSON(sessions []session.Session) error {
 
 // --- filters -----------------------------------------------------------------
 
-func filterSince(sessions []session.Session, since time.Time) []session.Session {
+func filterSince(entries []index.Entry, since time.Time) []index.Entry {
 	// Truncate to date only for comparison.
 	sinceDate := since.Truncate(24 * time.Hour)
-	var out []session.Session
-	for _, s := range sessions {
-		sessionDate := s.Date.UTC().Truncate(24 * time.Hour)
+	var out []index.Entry
+	for _, e := range entries {
+		sessionDate := e.Date.UTC().Truncate(24 * time.Hour)
 		if !sessionDate.Before(sinceDate) {
-			out = append(out, s)
+			out = append(out, e)
 		}
 	}
 	return out
 }
 
-func filterTag(sessions []session.Session, tag string) []session.Session {
-	var out []session.Session
-	for _, s := range sessions {
-		for _, t := range s.Tags {
+func filterTag(entries []index.Entry, tag string) []index.Entry {
+	var out []index.Entry
+	for _, e := range entries {
+		for _, t := range e.Tags {
 			if t == tag {
-				out = append(out, s)
+				out = append(out, e)
 				break
 			}
 		}
@@ -157,11 +149,11 @@ func filterTag(sessions []session.Session, tag string) []session.Session {
 
 // --- sort --------------------------------------------------------------------
 
-// sortByDateDesc sorts sessions newest-first (in-place).
-func sortByDateDesc(sessions []session.Session) {
-	for i := 1; i < len(sessions); i++ {
-		for j := i; j > 0 && sessions[j].Date.After(sessions[j-1].Date); j-- {
-			sessions[j], sessions[j-1] = sessions[j-1], sessions[j]
+// sortByDateDesc sorts entries newest-first (in-place).
+func sortByDateDesc(entries []index.Entry) {
+	for i := 1; i < len(entries); i++ {
+		for j := i; j > 0 && entries[j].Date.After(entries[j-1].Date); j-- {
+			entries[j], entries[j-1] = entries[j-1], entries[j]
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/senna-lang/logosyncx/pkg/index"
 	"github.com/senna-lang/logosyncx/pkg/session"
 )
 
@@ -302,43 +303,43 @@ func TestSearch_Output_SortedNewestFirst(t *testing.T) {
 // --- filterKeyword unit tests ------------------------------------------------
 
 func TestFilterKeyword_MatchesTopic(t *testing.T) {
-	sessions := []session.Session{
+	entries := []index.Entry{
 		{Topic: "jwt-auth", Tags: []string{}, Excerpt: ""},
 		{Topic: "cache-layer", Tags: []string{}, Excerpt: ""},
 	}
-	result := filterKeyword(sessions, "jwt")
+	result := filterKeyword(entries, "jwt")
 	if len(result) != 1 || result[0].Topic != "jwt-auth" {
 		t.Errorf("expected jwt-auth, got %v", result)
 	}
 }
 
 func TestFilterKeyword_MatchesTag(t *testing.T) {
-	sessions := []session.Session{
+	entries := []index.Entry{
 		{Topic: "topic-a", Tags: []string{"security", "auth"}, Excerpt: ""},
 		{Topic: "topic-b", Tags: []string{"redis"}, Excerpt: ""},
 	}
-	result := filterKeyword(sessions, "auth")
+	result := filterKeyword(entries, "auth")
 	if len(result) != 1 || result[0].Topic != "topic-a" {
 		t.Errorf("expected topic-a, got %v", result)
 	}
 }
 
 func TestFilterKeyword_MatchesExcerpt(t *testing.T) {
-	sessions := []session.Session{
+	entries := []index.Entry{
 		{Topic: "topic-a", Tags: []string{}, Excerpt: "We adopted event sourcing."},
 		{Topic: "topic-b", Tags: []string{}, Excerpt: "Standard REST approach."},
 	}
-	result := filterKeyword(sessions, "event sourcing")
+	result := filterKeyword(entries, "event sourcing")
 	if len(result) != 1 || result[0].Topic != "topic-a" {
 		t.Errorf("expected topic-a, got %v", result)
 	}
 }
 
 func TestFilterKeyword_NoMatch(t *testing.T) {
-	sessions := []session.Session{
+	entries := []index.Entry{
 		{Topic: "foo", Tags: []string{"bar"}, Excerpt: "baz"},
 	}
-	result := filterKeyword(sessions, "zzz")
+	result := filterKeyword(entries, "zzz")
 	if len(result) != 0 {
 		t.Errorf("expected no matches, got %d", len(result))
 	}
@@ -347,66 +348,66 @@ func TestFilterKeyword_NoMatch(t *testing.T) {
 func TestFilterKeyword_EmptySessions(t *testing.T) {
 	result := filterKeyword(nil, "anything")
 	if len(result) != 0 {
-		t.Errorf("expected empty result for nil sessions, got %d", len(result))
+		t.Errorf("expected empty result for nil entries, got %d", len(result))
 	}
 }
 
 func TestFilterKeyword_CaseInsensitive(t *testing.T) {
-	sessions := []session.Session{
+	entries := []index.Entry{
 		{Topic: "GraphQL-Migration", Tags: []string{}, Excerpt: ""},
 	}
-	result := filterKeyword(sessions, "GRAPHQL")
+	result := filterKeyword(entries, "GRAPHQL")
 	if len(result) != 1 {
 		t.Errorf("expected 1 case-insensitive match, got %d", len(result))
 	}
 }
 
 func TestFilterKeyword_MultipleMatches(t *testing.T) {
-	sessions := []session.Session{
+	entries := []index.Entry{
 		{Topic: "auth-login", Tags: []string{"auth"}, Excerpt: "Login."},
 		{Topic: "auth-signup", Tags: []string{"auth"}, Excerpt: "Signup."},
 		{Topic: "payments", Tags: []string{"billing"}, Excerpt: "Stripe."},
 	}
-	result := filterKeyword(sessions, "auth")
+	result := filterKeyword(entries, "auth")
 	if len(result) != 2 {
 		t.Errorf("expected 2 matches, got %d", len(result))
 	}
 }
 
-// --- sessionMatchesKeyword unit tests ----------------------------------------
+// --- entryMatchesKeyword unit tests ------------------------------------------
 
 func TestSessionMatchesKeyword_TopicOnly(t *testing.T) {
-	s := session.Session{Topic: "database-migration", Tags: []string{}, Excerpt: ""}
-	if !sessionMatchesKeyword(s, "database") {
+	e := index.Entry{Topic: "database-migration", Tags: []string{}, Excerpt: ""}
+	if !entryMatchesKeyword(e, "database") {
 		t.Error("expected match on topic substring")
 	}
 }
 
 func TestSessionMatchesKeyword_TagOnly(t *testing.T) {
-	s := session.Session{Topic: "unrelated", Tags: []string{"golang", "testing"}, Excerpt: ""}
-	if !sessionMatchesKeyword(s, "testing") {
+	e := index.Entry{Topic: "unrelated", Tags: []string{"golang", "testing"}, Excerpt: ""}
+	if !entryMatchesKeyword(e, "testing") {
 		t.Error("expected match on tag")
 	}
 }
 
 func TestSessionMatchesKeyword_ExcerptOnly(t *testing.T) {
-	s := session.Session{Topic: "unrelated", Tags: []string{}, Excerpt: "Decided to use Postgres."}
-	if !sessionMatchesKeyword(s, "postgres") {
+	e := index.Entry{Topic: "unrelated", Tags: []string{}, Excerpt: "Decided to use Postgres."}
+	if !entryMatchesKeyword(e, "postgres") {
 		t.Error("expected case-insensitive match on excerpt")
 	}
 }
 
 func TestSessionMatchesKeyword_NoMatch(t *testing.T) {
-	s := session.Session{Topic: "foo", Tags: []string{"bar"}, Excerpt: "baz"}
-	if sessionMatchesKeyword(s, "zzz") {
+	e := index.Entry{Topic: "foo", Tags: []string{"bar"}, Excerpt: "baz"}
+	if entryMatchesKeyword(e, "zzz") {
 		t.Error("expected no match")
 	}
 }
 
 func TestSessionMatchesKeyword_EmptyKeyword_MatchesAll(t *testing.T) {
-	s := session.Session{Topic: "foo", Tags: []string{}, Excerpt: ""}
+	e := index.Entry{Topic: "foo", Tags: []string{}, Excerpt: ""}
 	// Empty string is a substring of everything.
-	if !sessionMatchesKeyword(s, "") {
+	if !entryMatchesKeyword(e, "") {
 		t.Error("expected empty keyword to match all sessions")
 	}
 }
