@@ -1,0 +1,11 @@
+#!/bin/sh
+# pre-commit hook: reject commits that contain unformatted Go files.
+# Run 'make fmt' to fix formatting before committing.
+
+UNFORMATTED=$(gofmt -l .)
+
+if [ -n "$UNFORMATTED" ]; then
+  echo "Error: the following files are not gofmt-formatted (run 'make fmt'):"
+  echo "$UNFORMATTED" | sed 's/^/  /'
+  exit 1
+fi

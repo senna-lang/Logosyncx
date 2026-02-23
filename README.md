@@ -354,6 +354,44 @@ Logosyncx focuses on storing and retrieving data — the LLM decides what is rel
 
 ---
 
+## Development
+
+### Setup
+
+After cloning the repository, run `make setup` once to activate the git pre-commit hook:
+
+```sh
+git clone https://github.com/senna-lang/logosyncx.git
+cd logosyncx
+make setup
+```
+
+This configures `git config core.hooksPath scripts/hooks`, which activates a pre-commit hook that rejects commits containing unformatted Go files.
+
+### Available make targets
+
+| Target | Description |
+|--------|-------------|
+| `make setup` | Configure git hooks (run once after cloning) |
+| `make fmt` | Format all Go source files (`go fmt ./...`) |
+| `make lint` | Run static analysis (`go vet ./...`) |
+| `make test` | Run all tests (`go test ./...`) |
+| `make build` | Build the `logos` binary |
+| `make clean` | Remove the built binary |
+
+### Before committing
+
+```sh
+make fmt   # fix formatting
+make lint  # check for issues
+make test  # run tests
+```
+
+The pre-commit hook automatically blocks commits that include unformatted files.
+If the hook fires, run `make fmt` and re-stage your changes.
+
+---
+
 ## License
 
 MIT

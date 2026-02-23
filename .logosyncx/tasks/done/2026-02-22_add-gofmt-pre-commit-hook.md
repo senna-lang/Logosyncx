@@ -1,8 +1,8 @@
 ---
 id: t-gofmt01
-date: 2026-02-22T20:29:24.682310+09:00
+date: 2026-02-22T20:29:24.68231+09:00
 title: Add go fmt pre-commit hook via Makefile and scripts/hooks
-status: open
+status: done
 priority: medium
 session: 2026-02-22_go-fmt-pre-commit-hook-plan.md
 tags:
