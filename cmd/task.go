@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -45,44 +44,54 @@ func init() {
 var taskCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new task file",
-	Long: `Read a task Markdown file via --file or --stdin, auto-fill id/date,
-and save it to .logosyncx/tasks/. Optionally link it to an existing session
-with --session.`,
+	Long: `Create a task in .logosyncx/tasks/ using flag-based input.
+
+  logos task create --title "..." [--description "..."] [--priority high|medium|low] \
+                    [--tag <tag>] [--session <partial>]
+
+auto-fills id/date. Optionally link to an existing session with --session.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		filePath, _ := cmd.Flags().GetString("file")
-		useStdin, _ := cmd.Flags().GetBool("stdin")
 		sessionPartial, _ := cmd.Flags().GetString("session")
-		return runTaskCreate(filePath, useStdin, sessionPartial)
+		title, _ := cmd.Flags().GetString("title")
+		description, _ := cmd.Flags().GetString("description")
+		priority, _ := cmd.Flags().GetString("priority")
+		tags, _ := cmd.Flags().GetStringArray("tag")
+		return runTaskCreate(sessionPartial, title, description, priority, tags)
 	},
 }
 
 func init() {
-	taskCreateCmd.Flags().StringP("file", "f", "", "Path to the task Markdown file")
-	taskCreateCmd.Flags().Bool("stdin", false, "Read task Markdown from stdin")
 	taskCreateCmd.Flags().StringP("session", "s", "", "Partial name of the session to link (resolved by partial match)")
+	taskCreateCmd.Flags().StringP("title", "T", "", "Task title (required)")
+	taskCreateCmd.Flags().StringP("description", "d", "", "Task description (sets the ## What section body)")
+	taskCreateCmd.Flags().StringP("priority", "p", "medium", "Task priority (high|medium|low)")
+	taskCreateCmd.Flags().StringArray("tag", []string{}, "Tag to attach (repeatable: --tag go --tag cli)")
 }
 
-func runTaskCreate(filePath string, useStdin bool, sessionPartial string) error {
-	if filePath == "" && !useStdin {
-		return errors.New("provide --file <path> or --stdin")
-	}
-	if filePath != "" && useStdin {
-		return errors.New("--file and --stdin are mutually exclusive")
+func runTaskCreate(sessionPartial, title, description, priority string, tags []string) error {
+	if strings.TrimSpace(title) == "" {
+		return errors.New("provide --title <title>")
 	}
 
-	// Read raw markdown.
-	var data []byte
-	var err error
-	if useStdin {
-		data, err = io.ReadAll(os.Stdin)
-		if err != nil {
-			return fmt.Errorf("read stdin: %w", err)
-		}
+	// Validate priority.
+	p := task.Priority(priority)
+	if priority != "" && !task.IsValidPriority(p) {
+		return fmt.Errorf("invalid priority %q: must be one of high, medium, low", priority)
+	}
+
+	// Build body markdown from description.
+	var body string
+	if description != "" {
+		body = "## What\n\n" + description + "\n"
 	} else {
-		data, err = os.ReadFile(filePath)
-		if err != nil {
-			return fmt.Errorf("read file %s: %w", filePath, err)
-		}
+		body = "## What\n\n"
+	}
+
+	t := task.Task{
+		Title:    title,
+		Priority: p,
+		Tags:     tags,
+		Body:     body,
 	}
 
 	root, err := project.FindRoot()
@@ -94,17 +103,6 @@ func runTaskCreate(filePath string, useStdin bool, sessionPartial string) error 
 		return fmt.Errorf("load config: %w", err)
 	}
 	store := task.NewStore(root, &cfg)
-
-	// Parse task.
-	t, err := task.Parse("input", data)
-	if err != nil {
-		return fmt.Errorf("parse task: %w", err)
-	}
-
-	// Validate status if provided.
-	if t.Status != "" && !task.IsValidStatus(t.Status) {
-		return fmt.Errorf("invalid status %q: must be one of open, in_progress, done, cancelled", t.Status)
-	}
 
 	// Resolve and overwrite session field if --session was supplied.
 	if sessionPartial != "" {

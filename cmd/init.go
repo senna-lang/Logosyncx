@@ -23,7 +23,7 @@ Use it proactively to find relevant past decisions and designs.
 - When the user mentions a past discussion or asks about context: run ` + "`logos ls --json`" + ` and judge which sessions are relevant
 - When starting work on a feature: check ` + "`logos ls --json`" + ` for related sessions
 - When the user says "continue from last time": ` + "`logos refer`" + ` on the latest session
-- When the user says "save this session" or similar: generate a session file from the template and run ` + "`logos save`" + `
+- When the user says "save this session" or similar: run ` + "`logos save --topic \"...\" --body-stdin`" + `
 
 ## Workflow for finding relevant context
 
@@ -34,9 +34,25 @@ Use it proactively to find relevant past decisions and designs.
 
 ## Workflow for saving context
 
-1. Read ` + "`.logosyncx/template.md`" + ` to understand the structure
-2. Fill in each section based on the conversation history
-3. Run ` + "`logos save --stdin`" + ` or ` + "`logos save --file <path>`" + ` to persist it
+` + "```" + `
+logos save --topic "short description of the session" \
+           --tag go --tag cli \
+           --agent claude-code \
+           --body-stdin <<'EOF'
+## Summary
+
+What happened in this session.
+
+## Key Decisions
+
+- Decision one
+EOF
+` + "```" + `
+
+Or inline for short sessions:
+` + "```" + `
+logos save --topic "quick fix" --body "## Summary\n\nFixed the bug."
+` + "```" + `
 
 ## Commands
 
@@ -57,8 +73,13 @@ logos refer <filename> --summary  # key sections only (saves tokens, prefer this
 
 ### Save a session
 ` + "```" + `
-logos save --file <path>    # save from a generated md file
-logos save --stdin          # save from stdin (pipe)
+logos save --topic "..."                         # topic only, empty body
+logos save --topic "..." --body "..."            # inline body
+logos save --topic "..." --body-stdin            # body prose from stdin
+logos save --topic "..." --tag go --tag cli \
+           --agent claude-code \
+           --related 2026-01-01_previous.md \
+           --body-stdin
 ` + "```" + `
 
 ### Search (keyword narrowing)
@@ -85,10 +106,13 @@ Tasks are always linked to a session — the session serves as the rationale for
 
 ### Workflow for creating a task
 
-1. Confirm the current session is already saved (` + "`logos ls --json`" + ` to get the latest filename)
-2. Read ` + "`.logosyncx/task-template.md`" + ` to understand the structure
-3. Fill in ` + "`What`" + `, ` + "`Why`" + `, ` + "`Scope`" + `, and ` + "`Checklist`" + ` from the conversation
-4. Run ` + "`logos task create --session <session-name> --stdin`" + ` to save
+` + "```" + `
+logos task create --title "Implement the thing" \
+                  --description "Add X so that Y." \
+                  --priority high \
+                  --tag go --tag cli \
+                  --session <partial-session-name>
+` + "```" + `
 
 ### Workflow for checking tasks
 
@@ -113,9 +137,9 @@ logos task refer <name> --summary         # key sections only (saves tokens)
 logos task refer <name> --with-session    # append linked session summary
 
 # Create a task
-logos task create --file <path>           # from a generated md file
-logos task create --stdin                 # from stdin (pipe)
-logos task create --session <name> --stdin  # link to a session while creating
+logos task create --title "..."                    # title only, medium priority
+logos task create --title "..." --description "..." --priority high --tag <tag>
+logos task create --title "..." --session <name>   # link to a session
 
 # Update a task
 logos task update <name> --status in_progress  # moves file to tasks/in_progress/

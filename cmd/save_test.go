@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +10,7 @@ import (
 	"github.com/senna-lang/logosyncx/pkg/session"
 )
 
-// helpers
+// --- helpers -----------------------------------------------------------------
 
 func setupInitedProject(t *testing.T) string {
 	t.Helper()
@@ -30,170 +29,117 @@ func setupInitedProject(t *testing.T) string {
 	return dir
 }
 
-func writeTempSession(t *testing.T, dir, filename, content string) string {
-	t.Helper()
-	path := filepath.Join(dir, filename)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("write temp session: %v", err)
-	}
-	return path
-}
-
-func validSessionContent(topic string) string {
-	return "---\n" +
-		"id: \n" +
-		"date: \n" +
-		"topic: " + topic + "\n" +
-		"tags:\n  - test\n" +
-		"agent: claude-code\n" +
-		"related: []\n" +
-		"---\n\n" +
-		"## Summary\nThis is a test session about " + topic + ".\n\n" +
-		"## Key Decisions\n- Decision one\n"
-}
-
-func minimalSessionContent(topic string) string {
-	return "---\n" +
-		"topic: " + topic + "\n" +
-		"---\n\n" +
-		"## Summary\nMinimal session.\n"
-}
-
 // --- flag validation ---------------------------------------------------------
 
-func TestSave_ErrorWhenNoFlagsProvided(t *testing.T) {
-	err := runSave("", false)
+func TestSave_ErrorWhenNoTopicProvided(t *testing.T) {
+	err := runSave("", nil, "", nil, "", false)
 	if err == nil {
-		t.Fatal("expected error when no flags provided, got nil")
+		t.Fatal("expected error when no topic provided, got nil")
 	}
-	if !strings.Contains(err.Error(), "--file") && !strings.Contains(err.Error(), "--stdin") {
-		t.Errorf("expected error to mention --file or --stdin, got: %v", err)
+	if !strings.Contains(err.Error(), "--topic") {
+		t.Errorf("expected error to mention --topic, got: %v", err)
 	}
 }
 
-func TestSave_ErrorWhenBothFlagsProvided(t *testing.T) {
-	err := runSave("somefile.md", true)
+func TestSave_ErrorWhenBodyAndBodyStdinBothSet(t *testing.T) {
+	setupInitedProject(t)
+
+	err := runSave("body-conflict", nil, "", nil, "inline body", true)
 	if err == nil {
-		t.Fatal("expected error when both --file and --stdin provided, got nil")
+		t.Fatal("expected error when --body and --body-stdin both set, got nil")
 	}
 	if !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Errorf("expected 'mutually exclusive' error, got: %v", err)
+		t.Errorf("expected 'mutually exclusive' in error, got: %v", err)
 	}
 }
 
-// --- --file ------------------------------------------------------------------
+// --- flag-based save ---------------------------------------------------------
 
-func TestSave_File_ErrorOnMissingFile(t *testing.T) {
-	setupInitedProject(t)
-	err := runSave("/nonexistent/path/session.md", false)
-	if err == nil {
-		t.Fatal("expected error for missing file, got nil")
-	}
-}
-
-func TestSave_File_SavesSession(t *testing.T) {
+func TestSave_TopicOnly(t *testing.T) {
 	dir := setupInitedProject(t)
 
-	content := validSessionContent("file-save-test")
-	path := writeTempSession(t, dir, "session.md", content)
-
-	if err := runSave(path, false); err != nil {
-		t.Fatalf("runSave failed: %v", err)
+	if err := runSave("topic-only", nil, "", nil, "", false); err != nil {
+		t.Fatalf("runSave with --topic failed: %v", err)
 	}
 
 	sessions, err := session.LoadAll(dir)
 	if err != nil {
-		t.Fatalf("LoadAll failed: %v", err)
+		t.Fatalf("LoadAll: %v", err)
 	}
 	if len(sessions) != 1 {
 		t.Fatalf("expected 1 session, got %d", len(sessions))
 	}
-	if sessions[0].Topic != "file-save-test" {
-		t.Errorf("topic = %q, want 'file-save-test'", sessions[0].Topic)
+	if sessions[0].Topic != "topic-only" {
+		t.Errorf("topic = %q, want 'topic-only'", sessions[0].Topic)
 	}
 }
 
-func TestSave_File_AutoFillsID(t *testing.T) {
+func TestSave_AllFields(t *testing.T) {
 	dir := setupInitedProject(t)
 
-	// Session with empty id field.
-	content := minimalSessionContent("autofill-id")
-	path := writeTempSession(t, dir, "session.md", content)
-
-	if err := runSave(path, false); err != nil {
-		t.Fatalf("runSave failed: %v", err)
+	body := "## Summary\n\nThis is a full flag-based session.\n"
+	if err := runSave("all-fields", []string{"go", "cli"}, "claude-code", []string{"2026-01-01_previous.md"}, body, false); err != nil {
+		t.Fatalf("runSave with all flags failed: %v", err)
 	}
 
 	sessions, err := session.LoadAll(dir)
 	if err != nil {
-		t.Fatalf("LoadAll failed: %v", err)
+		t.Fatalf("LoadAll: %v", err)
 	}
 	if len(sessions) != 1 {
 		t.Fatalf("expected 1 session, got %d", len(sessions))
 	}
-	if sessions[0].ID == "" {
-		t.Error("expected ID to be auto-filled, got empty string")
+	s := sessions[0]
+	if s.Topic != "all-fields" {
+		t.Errorf("topic = %q, want 'all-fields'", s.Topic)
+	}
+	if s.Agent != "claude-code" {
+		t.Errorf("agent = %q, want 'claude-code'", s.Agent)
+	}
+	if len(s.Tags) != 2 || s.Tags[0] != "go" || s.Tags[1] != "cli" {
+		t.Errorf("tags = %v, want [go cli]", s.Tags)
+	}
+	if len(s.Related) != 1 || s.Related[0] != "2026-01-01_previous.md" {
+		t.Errorf("related = %v, want [2026-01-01_previous.md]", s.Related)
+	}
+	if !strings.Contains(s.Body, "full flag-based session") {
+		t.Errorf("body does not contain expected text, got: %q", s.Body)
 	}
 }
 
-func TestSave_File_AutoFillsDate(t *testing.T) {
+func TestSave_AutoFillsIDAndDate(t *testing.T) {
 	dir := setupInitedProject(t)
 
 	before := time.Now().Add(-time.Second)
-	content := minimalSessionContent("autofill-date")
-	path := writeTempSession(t, dir, "session.md", content)
-
-	if err := runSave(path, false); err != nil {
+	if err := runSave("autofill-flags", nil, "", nil, "", false); err != nil {
 		t.Fatalf("runSave failed: %v", err)
 	}
 	after := time.Now().Add(time.Second)
 
 	sessions, err := session.LoadAll(dir)
 	if err != nil {
-		t.Fatalf("LoadAll failed: %v", err)
+		t.Fatalf("LoadAll: %v", err)
 	}
 	if len(sessions) != 1 {
 		t.Fatalf("expected 1 session, got %d", len(sessions))
 	}
-	d := sessions[0].Date
-	if d.Before(before) || d.After(after) {
-		t.Errorf("date %v not within expected range [%v, %v]", d, before, after)
+	s := sessions[0]
+	if s.ID == "" {
+		t.Error("expected ID to be auto-filled, got empty string")
+	}
+	if s.Date.Before(before) || s.Date.After(after) {
+		t.Errorf("date %v not within expected range [%v, %v]", s.Date, before, after)
 	}
 }
 
-func TestSave_File_PreservesExistingID(t *testing.T) {
+func TestSave_FileNameFormat(t *testing.T) {
 	dir := setupInitedProject(t)
 
-	content := "---\nid: myexistingid\ntopic: preserve-id\n---\n\n## Summary\nTest.\n"
-	path := writeTempSession(t, dir, "session.md", content)
-
-	if err := runSave(path, false); err != nil {
+	if err := runSave("filename-format", nil, "", nil, "", false); err != nil {
 		t.Fatalf("runSave failed: %v", err)
 	}
 
-	sessions, err := session.LoadAll(dir)
-	if err != nil {
-		t.Fatalf("LoadAll failed: %v", err)
-	}
-	if len(sessions) != 1 {
-		t.Fatalf("expected 1 session, got %d", len(sessions))
-	}
-	if sessions[0].ID != "myexistingid" {
-		t.Errorf("ID = %q, want 'myexistingid'", sessions[0].ID)
-	}
-}
-
-func TestSave_File_FileNameFormat(t *testing.T) {
-	dir := setupInitedProject(t)
-
-	content := minimalSessionContent("filename-format")
-	path := writeTempSession(t, dir, "session.md", content)
-
-	if err := runSave(path, false); err != nil {
-		t.Fatalf("runSave failed: %v", err)
-	}
-
-	sessionsDir := filepath.Join(dir, ".logosyncx", "sessions")
+	sessionsDir := dir + "/.logosyncx/sessions"
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
 		t.Fatalf("ReadDir: %v", err)
@@ -211,84 +157,22 @@ func TestSave_File_FileNameFormat(t *testing.T) {
 	}
 }
 
-func TestSave_File_MissingTopicUsesUntitled(t *testing.T) {
+func TestSave_BodyStdin(t *testing.T) {
 	dir := setupInitedProject(t)
 
-	// No topic in frontmatter.
-	content := "---\nid: notopic\n---\n\n## Summary\nNo topic here.\n"
-	path := writeTempSession(t, dir, "session.md", content)
-
-	// Should not error, just warn.
-	if err := runSave(path, false); err != nil {
-		t.Fatalf("runSave should not error on missing topic, got: %v", err)
-	}
-
-	sessionsDir := filepath.Join(dir, ".logosyncx", "sessions")
-	entries, err := os.ReadDir(sessionsDir)
-	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 file in sessions/, got %d", len(entries))
-	}
-	if !strings.Contains(entries[0].Name(), "untitled") {
-		t.Errorf("expected 'untitled' in filename, got %q", entries[0].Name())
-	}
-}
-
-func TestSave_File_ErrorOnInvalidMarkdown(t *testing.T) {
-	dir := setupInitedProject(t)
-
-	// No frontmatter at all.
-	content := "This is just plain text, no frontmatter."
-	path := writeTempSession(t, dir, "bad.md", content)
-
-	err := runSave(path, false)
-	if err == nil {
-		t.Fatal("expected error for invalid markdown, got nil")
-	}
-}
-
-func TestSave_File_ErrorWhenNotInitialized(t *testing.T) {
-	dir := t.TempDir()
-	orig, _ := os.Getwd()
-	_ = os.Chdir(dir)
-	t.Cleanup(func() { _ = os.Chdir(orig) })
-
-	// No logos init run — no .logosyncx/ directory.
-	content := minimalSessionContent("no-init")
-	path := writeTempSession(t, dir, "session.md", content)
-
-	err := runSave(path, false)
-	if err == nil {
-		t.Fatal("expected error when project not initialized, got nil")
-	}
-	if !strings.Contains(err.Error(), "logos init") {
-		t.Errorf("expected 'logos init' hint in error, got: %v", err)
-	}
-}
-
-// --- --stdin -----------------------------------------------------------------
-
-func TestSave_Stdin_SavesSession(t *testing.T) {
-	dir := setupInitedProject(t)
-
-	content := minimalSessionContent("stdin-test")
-
-	// Redirect stdin from a pipe.
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
-	_, _ = w.WriteString(content)
+	_, _ = w.WriteString("## Summary\n\nBody from stdin.\n")
 	w.Close()
 
 	origStdin := os.Stdin
 	os.Stdin = r
 	t.Cleanup(func() { os.Stdin = origStdin })
 
-	if err := runSave("", true); err != nil {
-		t.Fatalf("runSave --stdin failed: %v", err)
+	if err := runSave("body-stdin-test", nil, "", nil, "", true); err != nil {
+		t.Fatalf("runSave with --body-stdin failed: %v", err)
 	}
 
 	sessions, err := session.LoadAll(dir)
@@ -298,8 +182,23 @@ func TestSave_Stdin_SavesSession(t *testing.T) {
 	if len(sessions) != 1 {
 		t.Fatalf("expected 1 session, got %d", len(sessions))
 	}
-	if sessions[0].Topic != "stdin-test" {
-		t.Errorf("topic = %q, want 'stdin-test'", sessions[0].Topic)
+	if !strings.Contains(sessions[0].Body, "Body from stdin") {
+		t.Errorf("body does not contain expected text, got: %q", sessions[0].Body)
+	}
+}
+
+func TestSave_ErrorWhenNotInitialized(t *testing.T) {
+	dir := t.TempDir()
+	orig, _ := os.Getwd()
+	_ = os.Chdir(dir)
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+
+	err := runSave("no-init", nil, "", nil, "", false)
+	if err == nil {
+		t.Fatal("expected error when project not initialized, got nil")
+	}
+	if !strings.Contains(err.Error(), "logos init") {
+		t.Errorf("expected 'logos init' hint in error, got: %v", err)
 	}
 }
 
@@ -354,17 +253,14 @@ func TestGenerateID_Unique(t *testing.T) {
 // --- warnPrivacy -------------------------------------------------------------
 
 func TestWarnPrivacy_NoPatterns(t *testing.T) {
-	// Should not panic with empty pattern list.
 	warnPrivacy("some content with sk-abc123", []string{})
 }
 
 func TestWarnPrivacy_InvalidPattern(t *testing.T) {
-	// Should not panic with an invalid regex.
 	warnPrivacy("content", []string{"[invalid"})
 }
 
 func TestWarnPrivacy_NoMatch(t *testing.T) {
-	// Smoke test: no panic when pattern doesn't match.
 	warnPrivacy("clean content", []string{`sk-[a-zA-Z0-9]+`})
 }
 
@@ -373,17 +269,12 @@ func TestWarnPrivacy_NoMatch(t *testing.T) {
 func TestSave_UsesConfigPrivacyPatterns(t *testing.T) {
 	dir := setupInitedProject(t)
 
-	// Write a config with a privacy filter.
 	cfg, _ := config.Load(dir)
 	cfg.Privacy.FilterPatterns = []string{`sk-[a-zA-Z0-9]+`}
 	_ = config.Save(dir, cfg)
 
-	// Write a session containing a fake API key.
-	content := "---\ntopic: privacy-test\n---\n\n## Summary\nUsed sk-abc123 for auth.\n"
-	path := writeTempSession(t, dir, "session.md", content)
-
-	// Should succeed (warning only, not a hard error).
-	if err := runSave(path, false); err != nil {
+	body := "## Summary\n\nUsed sk-abc123 for auth.\n"
+	if err := runSave("privacy-test", nil, "", nil, body, false); err != nil {
 		t.Fatalf("runSave should succeed even with privacy match, got: %v", err)
 	}
 }

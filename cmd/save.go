@@ -22,68 +22,68 @@ import (
 var saveCmd = &cobra.Command{
 	Use:   "save",
 	Short: "Save a session file to .logosyncx/sessions/",
-	Long: `Accept a Markdown session file via --file or --stdin, auto-fill missing
-frontmatter fields (id, date), and save it to .logosyncx/sessions/.
+	Long: `Save a session to .logosyncx/sessions/ using flag-based input.
+
+  logos save --topic "..." [--tag <tag>] [--agent <agent>] \
+             [--related <session>] [--body "..."] [--body-stdin]
+
 git add is run automatically; git commit and push remain the user's responsibility.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		filePath, _ := cmd.Flags().GetString("file")
-		useStdin, _ := cmd.Flags().GetBool("stdin")
-		return runSave(filePath, useStdin)
+		topic, _ := cmd.Flags().GetString("topic")
+		tags, _ := cmd.Flags().GetStringArray("tag")
+		agent, _ := cmd.Flags().GetString("agent")
+		related, _ := cmd.Flags().GetStringArray("related")
+		body, _ := cmd.Flags().GetString("body")
+		bodyStdin, _ := cmd.Flags().GetBool("body-stdin")
+		return runSave(topic, tags, agent, related, body, bodyStdin)
 	},
 }
 
 func init() {
-	saveCmd.Flags().StringP("file", "f", "", "Path to the session Markdown file to save")
-	saveCmd.Flags().Bool("stdin", false, "Read session Markdown from stdin")
+	saveCmd.Flags().StringP("topic", "t", "", "Session topic (required)")
+	saveCmd.Flags().StringArray("tag", []string{}, "Tag to attach (repeatable: --tag go --tag cli)")
+	saveCmd.Flags().StringP("agent", "a", "", "Agent name (e.g. claude-code)")
+	saveCmd.Flags().StringArray("related", []string{}, "Related session filename (repeatable)")
+	saveCmd.Flags().StringP("body", "b", "", "Session body text (inline)")
+	saveCmd.Flags().Bool("body-stdin", false, "Read session body prose from stdin (no frontmatter needed)")
 	rootCmd.AddCommand(saveCmd)
 }
 
-func runSave(filePath string, useStdin bool) error {
-	// Validate flags: exactly one source must be provided.
-	if filePath == "" && !useStdin {
-		return errors.New("provide --file <path> or --stdin")
+func runSave(topic string, tags []string, agent string, related []string, body string, bodyStdin bool) error {
+	if strings.TrimSpace(topic) == "" {
+		return errors.New("provide --topic <topic>")
 	}
-	if filePath != "" && useStdin {
-		return errors.New("--file and --stdin are mutually exclusive")
+	if body != "" && bodyStdin {
+		return errors.New("--body and --body-stdin are mutually exclusive")
 	}
 
-	// Read raw markdown from the chosen source.
-	var data []byte
-	var err error
-	if useStdin {
-		data, err = io.ReadAll(os.Stdin)
+	var bodyText string
+	if bodyStdin {
+		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return fmt.Errorf("read stdin: %w", err)
 		}
+		bodyText = string(data)
 	} else {
-		data, err = os.ReadFile(filePath)
-		if err != nil {
-			return fmt.Errorf("read file %s: %w", filePath, err)
-		}
+		bodyText = body
 	}
 
-	// Parse the session from the raw markdown.
-	s, err := session.Parse("input", data)
-	if err != nil {
-		return fmt.Errorf("parse session: %w", err)
+	s := session.Session{
+		Topic:   topic,
+		Tags:    tags,
+		Agent:   agent,
+		Related: related,
+		Body:    bodyText,
 	}
+
+	var err error
 
 	// Auto-fill missing frontmatter fields.
-	if s.ID == "" {
-		s.ID, err = generateID()
-		if err != nil {
-			return fmt.Errorf("generate id: %w", err)
-		}
+	s.ID, err = generateID()
+	if err != nil {
+		return fmt.Errorf("generate id: %w", err)
 	}
-	if s.Date.IsZero() {
-		s.Date = time.Now()
-	}
-
-	// Warn (but do not block) if topic is missing.
-	if strings.TrimSpace(s.Topic) == "" {
-		fmt.Fprintln(os.Stderr, "warning: frontmatter 'topic' is empty — filename will use 'untitled'")
-		s.Topic = "untitled"
-	}
+	s.Date = time.Now()
 
 	// Find the project root.
 	root, err := project.FindRoot()
@@ -109,7 +109,6 @@ func runSave(filePath string, useStdin bool) error {
 	fmt.Printf("✓ Saved session to %s\n", savedPath)
 
 	// Update the session index (append-only, best-effort).
-	// Reload the saved session so Filename and Excerpt are populated from disk.
 	savedSession, loadErr := session.LoadFile(savedPath)
 	if loadErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not load saved session for indexing (%v)\n", loadErr)
