@@ -34,6 +34,7 @@ func init() {
 		taskReferCmd,
 		taskUpdateCmd,
 		taskDeleteCmd,
+		taskPurgeCmd,
 		taskSearchCmd,
 	)
 	rootCmd.AddCommand(taskCmd)
@@ -321,32 +322,6 @@ func runTaskUpdate(nameOrPartial, statusStr, priorityStr, assignee string, force
 	}
 	store := task.NewStore(root, &cfg)
 
-	// Special case: --status done triggers deletion.
-	if statusStr == string(task.StatusDone) {
-		t, err := store.Get(nameOrPartial)
-		if err != nil {
-			return err
-		}
-
-		if !force {
-			fmt.Printf("Mark task %q (status: %s) as done and delete it? [y/N] ", t.Title, t.Status)
-			reader := bufio.NewReader(os.Stdin)
-			answer, _ := reader.ReadString('\n')
-			answer = strings.TrimSpace(strings.ToLower(answer))
-			if answer != "y" && answer != "yes" {
-				fmt.Println("Aborted.")
-				return nil
-			}
-		}
-
-		if err := store.Delete(t.Filename); err != nil {
-			return fmt.Errorf("delete task: %w", err)
-		}
-		fmt.Printf("✓ Task %q marked done and deleted.\n", t.Title)
-		return nil
-	}
-
-	// Normal update.
 	fields := make(map[string]string)
 	if statusStr != "" {
 		fields["status"] = statusStr
@@ -361,7 +336,90 @@ func runTaskUpdate(nameOrPartial, statusStr, priorityStr, assignee string, force
 	if err := store.UpdateFields(nameOrPartial, fields); err != nil {
 		return fmt.Errorf("update task: %w", err)
 	}
-	fmt.Printf("✓ Updated task %q.\n", nameOrPartial)
+
+	if statusStr != "" {
+		fmt.Printf("✓ Updated task %q → status: %s\n", nameOrPartial, statusStr)
+		if task.Status(statusStr) == task.StatusDone {
+			fmt.Println("  Tip: run `logos task purge --status done --force` to delete all done tasks.")
+		}
+	} else {
+		fmt.Printf("✓ Updated task %q.\n", nameOrPartial)
+	}
+	return nil
+}
+
+// --- logos task purge --------------------------------------------------------
+
+var taskPurgeCmd = &cobra.Command{
+	Use:   "purge",
+	Short: "Delete all tasks with a given status",
+	Long: `List all tasks matching --status, show a confirmation prompt, then
+delete them all at once. Use --force to skip the confirmation prompt.
+
+Unlike 'logos task delete' (which targets a single task by name), purge
+operates on every task in a status bucket — useful for cleaning up done or
+cancelled tasks in bulk.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		statusStr, _ := cmd.Flags().GetString("status")
+		force, _ := cmd.Flags().GetBool("force")
+		return runTaskPurge(statusStr, force)
+	},
+}
+
+func init() {
+	taskPurgeCmd.Flags().String("status", "", "Status bucket to purge (open, in_progress, done, cancelled)")
+	taskPurgeCmd.Flags().Bool("force", false, "Skip confirmation prompt")
+	_ = taskPurgeCmd.MarkFlagRequired("status")
+}
+
+func runTaskPurge(statusStr string, force bool) error {
+	if !task.IsValidStatus(task.Status(statusStr)) {
+		return fmt.Errorf("invalid status %q: must be one of open, in_progress, done, cancelled", statusStr)
+	}
+
+	root, err := project.FindRoot()
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	store := task.NewStore(root, &cfg)
+
+	// List tasks to be deleted so the user can review them.
+	tasks, err := store.List(task.Filter{Status: task.Status(statusStr)})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+	}
+
+	if len(tasks) == 0 {
+		fmt.Printf("No %s tasks to purge.\n", statusStr)
+		return nil
+	}
+
+	fmt.Printf("The following %d task(s) with status %q will be permanently deleted:\n\n", len(tasks), statusStr)
+	for _, t := range tasks {
+		fmt.Printf("  • %s  %s\n", t.Date.Format("2006-01-02"), t.Title)
+	}
+	fmt.Println()
+
+	if !force {
+		fmt.Printf("Delete all %d task(s)? [y/N] ", len(tasks))
+		reader := bufio.NewReader(os.Stdin)
+		answer, _ := reader.ReadString('\n')
+		answer = strings.TrimSpace(strings.ToLower(answer))
+		if answer != "y" && answer != "yes" {
+			fmt.Println("Aborted.")
+			return nil
+		}
+	}
+
+	n, err := store.Purge(task.Status(statusStr))
+	if err != nil {
+		return fmt.Errorf("purge: %w", err)
+	}
+	fmt.Printf("✓ Deleted %d task(s) with status %q.\n", n, statusStr)
 	return nil
 }
 

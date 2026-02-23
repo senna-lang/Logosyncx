@@ -8,16 +8,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The full design spec is in `ClaudeLogoSyncDesign.md`.
 
-## Issue Tracking
+## Task Tracking
 
-This project uses **beads** (`bd`) for issue tracking, stored in `.beads/`.
+This project uses **logos tasks** for issue tracking, stored in `.logosyncx/tasks/`.
 
 ```bash
-bd ready                                    # Find available work
-bd show <id>                                # View issue details
-bd update <id> --status in_progress        # Claim an issue
-bd close <id>                              # Complete an issue
-bd sync                                    # Sync with git
+logos task ls --status open --json          # Find available work
+logos task refer <name>                     # View task details
+logos task update <name> --status in_progress  # Claim a task
+logos task update <name> --status done      # Complete a task (deletes the file)
+logos sync                                  # Rebuild session and task indexes
 ```
 
 **Session completion is mandatory** — see `AGENTS.md` for the full workflow including required `git push`.

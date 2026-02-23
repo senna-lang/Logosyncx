@@ -114,8 +114,8 @@ func TestSync_PrintsRebuildingMessage(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(out, "Rebuilding index") {
-		t.Errorf("expected 'Rebuilding index' in output, got: %q", out)
+	if !strings.Contains(out, "Rebuilding session index") {
+		t.Errorf("expected 'Rebuilding session index' in output, got: %q", out)
 	}
 }
 

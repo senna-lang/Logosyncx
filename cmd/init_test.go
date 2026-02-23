@@ -44,6 +44,38 @@ func TestInit_CreatesSessionsDir(t *testing.T) {
 	}
 }
 
+func TestInit_CreatesTasksStatusSubdirs(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInitInDir(t, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, status := range []string{"open", "in_progress", "done", "cancelled"} {
+		path := filepath.Join(dir, ".logosyncx", "tasks", status)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			t.Errorf("expected .logosyncx/tasks/%s/ to be created", status)
+		}
+	}
+}
+
+func TestInit_DoesNotCreateFlatTasksDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInitInDir(t, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// The tasks/ root still exists (it must, since it holds the subdirs),
+	// but task files should NOT live directly in it — only in subdirs.
+	tasksDir := filepath.Join(dir, ".logosyncx", "tasks")
+	entries, err := os.ReadDir(tasksDir)
+	if err != nil {
+		t.Fatalf("ReadDir tasks/: %v", err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			t.Errorf("expected only subdirs in tasks/, found file %q", e.Name())
+		}
+	}
+}
+
 func TestInit_CreatesConfigJSON(t *testing.T) {
 	dir := t.TempDir()
 	if err := runInitInDir(t, dir); err != nil {

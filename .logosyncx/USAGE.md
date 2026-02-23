@@ -103,15 +103,19 @@ logos task create --stdin                 # from stdin (pipe)
 logos task create --session <name> --stdin  # link to a session while creating
 
 # Update a task
-logos task update <name> --status in_progress
-logos task update <name> --status done    # marks done and deletes the file (prompts for confirmation)
-logos task update <name> --status done --force  # skip confirmation
+logos task update <name> --status in_progress  # moves file to tasks/in_progress/
+logos task update <name> --status done         # moves file to tasks/done/
 logos task update <name> --priority high
 logos task update <name> --assignee <name>
 
-# Delete a task
+# Delete a single task
 logos task delete <name>                  # prompts for confirmation
 logos task delete <name> --force          # skip confirmation
+
+# Bulk-delete all tasks with a given status
+logos task purge --status done            # shows list + confirmation prompt
+logos task purge --status done --force    # skip confirmation
+logos task purge --status cancelled --force
 
 # Search tasks
 logos task search "keyword"               # search title, tags, and excerpt

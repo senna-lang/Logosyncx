@@ -16,7 +16,6 @@ import (
 func setupStore(t *testing.T) (string, *Store) {
 	t.Helper()
 	dir := t.TempDir()
-	// Create .logosyncx/tasks/ and .logosyncx/sessions/ directories.
 	if err := os.MkdirAll(filepath.Join(dir, ".logosyncx", "tasks"), 0o755); err != nil {
 		t.Fatalf("mkdir tasks: %v", err)
 	}
@@ -83,6 +82,16 @@ func TestSave_CreatesFile(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("expected file at %s, got: %v", path, err)
+	}
+}
+
+func TestSave_FileInStatusSubdir(t *testing.T) {
+	_, store := setupStore(t)
+	path := writeTaskFile(t, store, "subdir-test", "in_progress", "medium", time.Now())
+
+	expectedSubdir := filepath.Join(store.dir, "in_progress")
+	if !strings.HasPrefix(path, expectedSubdir) {
+		t.Errorf("expected path under tasks/in_progress/, got %q", path)
 	}
 }
 
@@ -188,12 +197,14 @@ func TestSave_FileNameFormat(t *testing.T) {
 	writeTaskFile(t, store, "test task", "open", "medium",
 		time.Date(2025, 2, 20, 10, 0, 0, 0, time.UTC))
 
-	entries, err := os.ReadDir(store.dir)
+	// File should be in tasks/open/
+	openDir := filepath.Join(store.dir, "open")
+	entries, err := os.ReadDir(openDir)
 	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
+		t.Fatalf("ReadDir tasks/open: %v", err)
 	}
 	if len(entries) == 0 {
-		t.Fatal("expected at least one file in tasks/")
+		t.Fatal("expected at least one file in tasks/open/")
 	}
 	name := entries[0].Name()
 	if !strings.HasSuffix(name, ".md") {
@@ -220,7 +231,7 @@ func TestSave_SetsExcerptFromWhatSection(t *testing.T) {
 
 func TestSave_CreatesDirIfNotExist(t *testing.T) {
 	dir := t.TempDir()
-	// Do NOT create tasks/ dir — Save should create it.
+	// Do NOT create tasks/ dir — Save should create it (including the status subdir).
 	if err := os.MkdirAll(filepath.Join(dir, ".logosyncx"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -229,10 +240,12 @@ func TestSave_CreatesDirIfNotExist(t *testing.T) {
 
 	tk := &Task{Title: "create-dir", Body: "## What\nTest.\n"}
 	if _, err := store.Save(tk, tk.Body); err != nil {
-		t.Fatalf("Save should create tasks/ dir automatically: %v", err)
+		t.Fatalf("Save should create tasks/open/ dir automatically: %v", err)
 	}
-	if _, err := os.Stat(store.dir); err != nil {
-		t.Errorf("expected tasks/ dir to be created, got: %v", err)
+	// Default status is "open", so tasks/open/ should have been created.
+	openDir := filepath.Join(store.dir, string(StatusOpen))
+	if _, err := os.Stat(openDir); err != nil {
+		t.Errorf("expected tasks/open/ dir to be created, got: %v", err)
 	}
 }
 
@@ -273,6 +286,22 @@ func TestList_ReturnsAllTasks(t *testing.T) {
 	}
 	if len(tasks) != 2 {
 		t.Errorf("expected 2 tasks, got %d", len(tasks))
+	}
+}
+
+func TestList_ReturnsTasksAcrossAllStatusSubdirs(t *testing.T) {
+	_, store := setupStore(t)
+	writeTaskFile(t, store, "open-task", "open", "medium", time.Now())
+	writeTaskFile(t, store, "wip-task", "in_progress", "medium", time.Now())
+	writeTaskFile(t, store, "done-task", "done", "medium", time.Now())
+	writeTaskFile(t, store, "cancelled-task", "cancelled", "medium", time.Now())
+
+	tasks, err := store.List(Filter{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(tasks) != 4 {
+		t.Errorf("expected 4 tasks across all subdirs, got %d", len(tasks))
 	}
 }
 
@@ -353,6 +382,23 @@ func TestGet_PartialMatch(t *testing.T) {
 	}
 }
 
+func TestGet_FindsAcrossStatusSubdirs(t *testing.T) {
+	_, store := setupStore(t)
+	writeTaskFile(t, store, "open-task", "open", "medium", time.Now())
+	writeTaskFile(t, store, "done-task", "done", "medium", time.Now())
+
+	got, err := store.Get("done-task")
+	if err != nil {
+		t.Fatalf("Get across subdirs: %v", err)
+	}
+	if got.Title != "done-task" {
+		t.Errorf("Title = %q, want 'done-task'", got.Title)
+	}
+	if got.Status != StatusDone {
+		t.Errorf("Status = %q, want 'done'", got.Status)
+	}
+}
+
 func TestGet_NotFound_ReturnsErrNotFound(t *testing.T) {
 	_, store := setupStore(t)
 
@@ -364,13 +410,24 @@ func TestGet_NotFound_ReturnsErrNotFound(t *testing.T) {
 
 func TestGet_AmbiguousMatch_ReturnsErrAmbiguous(t *testing.T) {
 	_, store := setupStore(t)
-	// Two tasks with "auth" in the name.
 	writeTaskFile(t, store, "auth-login", "open", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
 	writeTaskFile(t, store, "auth-signup", "open", "medium", time.Date(2025, 2, 21, 0, 0, 0, 0, time.UTC))
 
 	_, err := store.Get("auth")
 	if !errors.Is(err, ErrAmbiguous) {
 		t.Errorf("expected ErrAmbiguous, got %v", err)
+	}
+}
+
+func TestGet_AmbiguousAcrossSubdirs(t *testing.T) {
+	_, store := setupStore(t)
+	// Same slug in different status dirs would be ambiguous.
+	writeTaskFile(t, store, "auth-login", "open", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
+	writeTaskFile(t, store, "auth-logout", "done", "medium", time.Date(2025, 2, 21, 0, 0, 0, 0, time.UTC))
+
+	_, err := store.Get("auth")
+	if !errors.Is(err, ErrAmbiguous) {
+		t.Errorf("expected ErrAmbiguous across subdirs, got %v", err)
 	}
 }
 
@@ -403,6 +460,46 @@ func TestUpdateFields_Status(t *testing.T) {
 	}
 	if got.Status != StatusInProgress {
 		t.Errorf("Status = %q, want 'in_progress'", got.Status)
+	}
+}
+
+func TestUpdateFields_Status_MovesFile(t *testing.T) {
+	_, store := setupStore(t)
+	path := writeTaskFile(t, store, "move-me", "open", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
+
+	// Confirm the file starts in tasks/open/.
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("original file should exist at %s", path)
+	}
+
+	if err := store.UpdateFields("move-me", map[string]string{"status": "in_progress"}); err != nil {
+		t.Fatalf("UpdateFields: %v", err)
+	}
+
+	// Old path should no longer exist.
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("old file should have been removed from %s", path)
+	}
+
+	// File should now be in tasks/in_progress/.
+	filename := filepath.Base(path)
+	newPath := filepath.Join(store.dir, "in_progress", filename)
+	if _, err := os.Stat(newPath); err != nil {
+		t.Errorf("file should have been moved to %s: %v", newPath, err)
+	}
+}
+
+func TestUpdateFields_NonStatusField_DoesNotMoveFile(t *testing.T) {
+	_, store := setupStore(t)
+	path := writeTaskFile(t, store, "no-move", "open", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
+
+	if err := store.UpdateFields("no-move", map[string]string{"priority": "high"}); err != nil {
+		t.Fatalf("UpdateFields: %v", err)
+	}
+
+	// File should still be in tasks/open/.
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("file should remain at %s after non-status update: %v", path, err)
 	}
 }
 
@@ -541,6 +638,18 @@ func TestDelete_RemovesFile(t *testing.T) {
 	}
 }
 
+func TestDelete_RemovesFileFromAnySubdir(t *testing.T) {
+	_, store := setupStore(t)
+	path := writeTaskFile(t, store, "done-delete", "done", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
+
+	if err := store.Delete("done-delete"); err != nil {
+		t.Fatalf("Delete from done/: %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("expected file to be deleted from tasks/done/, got: %v", err)
+	}
+}
+
 func TestDelete_NotFound_ReturnsErrNotFound(t *testing.T) {
 	_, store := setupStore(t)
 	err := store.Delete("nonexistent")
@@ -578,6 +687,89 @@ func TestDelete_TaskGoneFromList(t *testing.T) {
 	}
 	if tasks[0].Title == "delete-me" {
 		t.Error("deleted task should not appear in List")
+	}
+}
+
+// --- Purge -------------------------------------------------------------------
+
+func TestPurge_DeletesAllWithStatus(t *testing.T) {
+	_, store := setupStore(t)
+	writeTaskFile(t, store, "done-one", "done", "medium", time.Now())
+	writeTaskFile(t, store, "done-two", "done", "medium", time.Now())
+	writeTaskFile(t, store, "keep-open", "open", "medium", time.Now())
+
+	n, err := store.Purge(StatusDone)
+	if err != nil {
+		t.Fatalf("Purge: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("expected 2 deleted, got %d", n)
+	}
+
+	remaining, err := store.List(Filter{})
+	if err != nil {
+		t.Fatalf("List after Purge: %v", err)
+	}
+	if len(remaining) != 1 || remaining[0].Title != "keep-open" {
+		t.Errorf("expected only 'keep-open' to remain, got %d tasks", len(remaining))
+	}
+}
+
+func TestPurge_EmptyStatus_ReturnsZero(t *testing.T) {
+	_, store := setupStore(t)
+	writeTaskFile(t, store, "open-task", "open", "medium", time.Now())
+
+	n, err := store.Purge(StatusDone) // no done tasks exist
+	if err != nil {
+		t.Fatalf("Purge on empty status: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 deleted, got %d", n)
+	}
+
+	// open task should be unaffected
+	tasks, _ := store.List(Filter{})
+	if len(tasks) != 1 {
+		t.Errorf("expected 1 remaining task, got %d", len(tasks))
+	}
+}
+
+func TestPurge_NoDirExists_ReturnsZero(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default("proj")
+	store := NewStore(dir, &cfg)
+
+	n, err := store.Purge(StatusCancelled)
+	if err != nil {
+		t.Fatalf("Purge on missing dir should not error: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0, got %d", n)
+	}
+}
+
+func TestPurge_OnlyDeletesMatchingStatus(t *testing.T) {
+	_, store := setupStore(t)
+	writeTaskFile(t, store, "cancelled-task", "cancelled", "medium", time.Now())
+	writeTaskFile(t, store, "open-task", "open", "medium", time.Now())
+	writeTaskFile(t, store, "wip-task", "in_progress", "medium", time.Now())
+
+	n, err := store.Purge(StatusCancelled)
+	if err != nil {
+		t.Fatalf("Purge: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 deleted, got %d", n)
+	}
+
+	remaining, _ := store.List(Filter{})
+	if len(remaining) != 2 {
+		t.Errorf("expected 2 remaining tasks, got %d", len(remaining))
+	}
+	for _, task := range remaining {
+		if task.Status == StatusCancelled {
+			t.Errorf("cancelled task should have been purged, found %q", task.Title)
+		}
 	}
 }
 
@@ -633,7 +825,6 @@ func TestResolveSession_NoSessionsDir_ReturnsErrNotFound(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default("proj")
 	store := NewStore(dir, &cfg)
-	// sessions/ dir does not exist.
 
 	_, err := store.ResolveSession("anything")
 	if !errors.Is(err, ErrNotFound) {
@@ -701,7 +892,7 @@ func TestSortByDateDesc_Tasks(t *testing.T) {
 	}
 	sortByDateDesc(tasks)
 	if tasks[0].Title != "c" || tasks[1].Title != "b" || tasks[2].Title != "a" {
-		t.Errorf("sort wrong: %v %v %v", tasks[0].Title, tasks[1].Title, tasks[2].Title)
+		t.Errorf("unexpected order: %v %v %v", tasks[0].Title, tasks[1].Title, tasks[2].Title)
 	}
 }
 
@@ -709,6 +900,6 @@ func TestSortByDateDesc_SingleElement(t *testing.T) {
 	tasks := []*Task{{Title: "only", Date: time.Now()}}
 	sortByDateDesc(tasks) // should not panic
 	if tasks[0].Title != "only" {
-		t.Error("single element sort changed the element")
+		t.Errorf("single element lost after sort")
 	}
 }

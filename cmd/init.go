@@ -118,15 +118,19 @@ logos task create --stdin                 # from stdin (pipe)
 logos task create --session <name> --stdin  # link to a session while creating
 
 # Update a task
-logos task update <name> --status in_progress
-logos task update <name> --status done    # marks done and deletes the file (prompts for confirmation)
-logos task update <name> --status done --force  # skip confirmation
+logos task update <name> --status in_progress  # moves file to tasks/in_progress/
+logos task update <name> --status done         # moves file to tasks/done/
 logos task update <name> --priority high
 logos task update <name> --assignee <name>
 
-# Delete a task
+# Delete a single task
 logos task delete <name>                  # prompts for confirmation
 logos task delete <name> --force          # skip confirmation
+
+# Bulk-delete all tasks with a given status
+logos task purge --status done            # shows list + confirmation prompt
+logos task purge --status done --force    # skip confirmation
+logos task purge --status cancelled --force
 
 # Search tasks
 logos task search "keyword"               # search title, tags, and excerpt
@@ -225,8 +229,10 @@ func runInit() error {
 	}
 
 	tasksDir := filepath.Join(logosyncxDir, "tasks")
-	if err := os.MkdirAll(tasksDir, 0o755); err != nil {
-		return fmt.Errorf("create tasks directory: %w", err)
+	for _, statusDir := range []string{"open", "in_progress", "done", "cancelled"} {
+		if err := os.MkdirAll(filepath.Join(tasksDir, statusDir), 0o755); err != nil {
+			return fmt.Errorf("create tasks/%s directory: %w", statusDir, err)
+		}
 	}
 
 	// 2. Write config.json with defaults.
@@ -272,7 +278,7 @@ func runInit() error {
 	fmt.Printf("  Created  .logosyncx/template.md\n")
 	fmt.Printf("  Created  .logosyncx/task-template.md\n")
 	fmt.Printf("  Created  .logosyncx/sessions/\n")
-	fmt.Printf("  Created  .logosyncx/tasks/\n")
+	fmt.Printf("  Created  .logosyncx/tasks/{open,in_progress,done,cancelled}/\n")
 	fmt.Printf("  Updated  %s\n", agentsFile)
 	fmt.Println()
 	fmt.Println("Next steps:")
