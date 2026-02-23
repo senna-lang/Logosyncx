@@ -31,7 +31,7 @@ Requires [Go 1.21+](https://go.dev/dl/).
 git clone https://github.com/senna-lang/logosyncx.git
 cd logosyncx
 go build -o logos .
-sudo mv logos /usr/local/bin/   # or anywhere on your $PATH
+mv logos /usr/local/bin/   # or anywhere on your $PATH
 ```
 
 ### Verify
@@ -52,8 +52,17 @@ logos version
 cd your-project
 logos init
 
-# 2. Save a session (agents do this automatically)
-logos save --file session.md
+# 2. Save a session
+logos save --topic "auth refactor" --tag auth --tag jwt --body-stdin <<'EOF'
+## Summary
+
+Decided to migrate from session cookies to JWT. The new flow uses RS256 signing.
+
+## Key Decisions
+
+- RS256 over HS256 for multi-service support
+- Refresh tokens stored in httpOnly cookies
+EOF
 
 # 3. List all saved sessions
 logos ls
@@ -77,7 +86,8 @@ Initializes Logosyncx in the current directory.
 logos init
 ```
 
-- Creates `.logosyncx/` with `config.json`, `USAGE.md`, and `template.md`
+- Creates `.logosyncx/` with `config.json`, `USAGE.md`, `template.md`, and `task-template.md`
+- Creates `.logosyncx/sessions/` and `.logosyncx/tasks/{open,in_progress,done,cancelled}/`
 - Appends a reference line to `AGENTS.md` (or `CLAUDE.md` if present)
 - Exits with an error if already initialized
 
@@ -85,16 +95,35 @@ logos init
 
 ### `logos save`
 
-Saves a session file to `.logosyncx/sessions/`.
+Saves a session to `.logosyncx/sessions/` using flag-based input.
 
 ```sh
-logos save --file path/to/session.md   # from a file
-cat session.md | logos save --stdin    # from stdin
+# Topic only (empty body)
+logos save --topic "quick sync"
+
+# Inline body
+logos save --topic "auth refactor" --body "## Summary\n\nSwitched to JWT."
+
+# Body from stdin (recommended for multi-line content)
+logos save --topic "auth refactor" \
+           --tag auth --tag jwt \
+           --agent claude-code \
+           --related 2025-02-18_db-schema.md \
+           --body-stdin < notes.md
 ```
 
-- `id` and `date` in the frontmatter are auto-filled if missing
-- Saved as `<date>_<topic>.md` and `git add` is run automatically
-- `git commit` and `git push` remain the user's responsibility
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--topic` | `-t` | Session topic — required, used as the filename slug |
+| `--tag` | | Tag to attach — repeatable (`--tag go --tag cli`) |
+| `--agent` | `-a` | Agent name (e.g. `claude-code`) |
+| `--related` | | Related session filename — repeatable |
+| `--body` | `-b` | Session body text (inline) |
+| `--body-stdin` | | Read body prose from stdin (no frontmatter needed) |
+
+- `id` and `date` are auto-filled automatically
+- Saved as `<date>_<topic>.md` under `.logosyncx/sessions/`
+- `git add` is run automatically; `git commit` and `git push` remain your responsibility
 
 ---
 
@@ -105,7 +134,7 @@ Lists all saved sessions.
 ```sh
 logos ls                        # human-readable table
 logos ls --tag auth             # filter by tag
-logos ls --since 2025-02-01    # filter by date
+logos ls --since 2025-02-01     # filter by date
 logos ls --json                 # structured JSON output (for agents)
 ```
 
@@ -158,19 +187,9 @@ For deeper semantic search, use `logos ls --json` and let the agent reason over 
 
 ---
 
-### `logos status`
-
-Shows uncommitted or unsaved changes in `.logosyncx/sessions/`.
-
-```sh
-logos status
-```
-
----
-
 ### `logos sync`
 
-Rebuilds the session index from disk. Run this after manually adding or editing `.md` files.
+Rebuilds the session and task indexes from disk. Run this after manually adding, editing, or deleting `.md` files.
 
 ```sh
 logos sync
@@ -178,40 +197,58 @@ logos sync
 
 ---
 
-## Session file format
+### `logos task`
 
-Sessions are plain Markdown files with YAML frontmatter.
-The default template (`.logosyncx/template.md`):
+Manages tasks stored in `.logosyncx/tasks/`.
 
-```markdown
----
-id: {{id}}
-date: {{date}}
-topic: {{topic}}
-tags: []
-agent:
-related: []
----
+```sh
+# Create a task
+logos task create --title "Implement rate limiting" \
+                  --description "Add per-IP rate limiting to the auth endpoint." \
+                  --priority high \
+                  --tag go --tag auth \
+                  --session auth-refactor
 
-## Summary
-<!-- Briefly describe what was discussed and decided -->
+# List tasks
+logos task ls                              # human-readable table
+logos task ls --status open               # filter by status
+logos task ls --priority high             # filter by priority
+logos task ls --tag auth                  # filter by tag
+logos task ls --json                      # structured JSON output
 
-## Key Decisions
-<!-- Important decisions as bullet points -->
--
+# Read a task
+logos task refer rate-limiting            # full content
+logos task refer rate-limiting --summary  # key sections only
+logos task refer rate-limiting --with-session  # append linked session summary
 
-## Context Used
-<!-- Past sessions or external resources referenced -->
+# Update a task
+logos task update rate-limiting --status in_progress
+logos task update rate-limiting --status done
+logos task update rate-limiting --priority medium
+logos task update rate-limiting --assignee alice
 
-## Notes
-<!-- Other notes -->
+# Search tasks
+logos task search "rate limit"
+logos task search "auth" --status open
 
-## Raw Conversation
-<!-- Paste the conversation log here (optional) -->
+# Delete tasks
+logos task delete rate-limiting           # prompts for confirmation
+logos task delete rate-limiting --force   # skip confirmation
+logos task purge --status done            # bulk-delete by status
+logos task purge --status done --force
 ```
 
-`{{id}}` and `{{date}}` are auto-filled by `logos save`.
-`{{topic}}` must be provided by the agent — a warning is shown if missing.
+`logos task create` flags:
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--title` | `-T` | Task title — required |
+| `--description` | `-d` | Task description (becomes the `## What` section) |
+| `--priority` | `-p` | `high` / `medium` / `low` (default: `medium`) |
+| `--tag` | | Tag to attach — repeatable |
+| `--session` | `-s` | Partial name of the session to link |
+
+Tasks are stored as markdown files in `.logosyncx/tasks/<status>/` and tracked in git alongside sessions.
 
 ---
 
@@ -237,7 +274,7 @@ related: []
 |-------|-------------|
 | `agents_file` | The file `logos init` appends its reference line to |
 | `save.summary_sections` | Sections returned by `logos refer --summary` |
-| `privacy.filter_patterns` | Regex patterns — matching content is warned/masked on `logos save` |
+| `privacy.filter_patterns` | Regex patterns — matching content triggers a warning on `logos save` |
 
 ---
 
@@ -245,20 +282,27 @@ related: []
 
 ```
 your-project/
-├── AGENTS.md                    ← logos init appends here
+├── AGENTS.md                        ← logos init appends here
 ├── .logosyncx/
 │   ├── config.json
-│   ├── USAGE.md                 ← agent-facing command reference
+│   ├── USAGE.md                     ← agent-facing command reference
 │   ├── template.md
-│   └── sessions/
-│       ├── 2025-02-20_auth-refactor.md
-│       └── 2025-02-18_db-schema.md
+│   ├── task-template.md
+│   ├── index.jsonl                  ← session index (auto-managed)
+│   ├── task-index.jsonl             ← task index (auto-managed)
+│   ├── sessions/
+│   │   ├── 2025-02-20_auth-refactor.md
+│   │   └── 2025-02-18_db-schema.md
+│   └── tasks/
+│       ├── open/
+│       ├── in_progress/
+│       ├── done/
+│       └── cancelled/
 └── ... (your existing files)
 ```
 
 `.logosyncx/` is committed to git. Context is shared across the team with a simple `git pull`.
-`sessions/` uses `<date>_<topic>.md` filenames so concurrent commits from multiple contributors
-never conflict.
+`sessions/` uses `<date>_<topic>.md` filenames so concurrent commits from multiple contributors never conflict.
 
 ---
 
@@ -273,6 +317,20 @@ Agent:
   3. Reads excerpts, judges "2025-02-20_auth-refactor.md looks relevant"
   4. Runs: logos refer auth-refactor --summary
   5. Answers with awareness of past decisions
+
+--- later ---
+
+User: "Save this session."
+
+Agent:
+  6. Runs: logos save --topic "auth middleware implementation" \
+                      --tag auth --tag go \
+                      --agent claude-code \
+                      --related 2025-02-20_auth-refactor.md \
+                      --body-stdin <<'EOF'
+     ## Summary
+     Implemented JWT middleware for the auth service...
+     EOF
 ```
 
 Semantic understanding is the agent's responsibility.
@@ -282,8 +340,6 @@ Logosyncx focuses on storing and retrieving data — the LLM decides what is rel
 
 ## Current status
 
-> ⚠️ This project is under active development. CLI commands are being implemented now.
-
 | Command | Status |
 |---------|--------|
 | `logos version` | ✅ Available |
@@ -292,8 +348,9 @@ Logosyncx focuses on storing and retrieving data — the LLM decides what is rel
 | `logos ls` | ✅ Available |
 | `logos refer` | ✅ Available |
 | `logos search` | ✅ Available |
+| `logos sync` | ✅ Available |
+| `logos task` | ✅ Available |
 | `logos status` | 📅 Planned |
-| `logos sync` | 📅 Planned |
 
 ---
 
