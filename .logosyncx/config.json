@@ -1,14 +1,14 @@
 {
-  "version": "1",
-  "project": "logosyncx",
-  "agents_file": "CLAUDE.md",
-  "save": {
-    "summary_sections": [
-      "Summary",
-      "Key Decisions"
-    ]
-  },
-  "privacy": {
-    "filter_patterns": []
-  }
+	"version": "1",
+	"project": "logosyncx",
+	"agents_file": "CLAUDE.md",
+	"save": {
+		"summary_sections": ["Summary", "Key Decisions"]
+	},
+	"privacy": {
+		"filter_patterns": []
+	},
+	"git": {
+		"auto_push": true
+	}
 }
