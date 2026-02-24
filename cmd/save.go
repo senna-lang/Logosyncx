@@ -88,7 +88,8 @@ func runSave(topic string, tags []string, agent string, related []string, body s
 	if err != nil {
 		return fmt.Errorf("generate id: %w", err)
 	}
-	s.Date = time.Now()
+	now := time.Now()
+	s.Date = &now
 
 	// Find the project root.
 	root, err := project.FindRoot()

@@ -29,7 +29,7 @@ func setupProjectWithSessions(t *testing.T, sessions []session.Session) string {
 func makeTestSession(topic string, tags []string, date time.Time) session.Session {
 	return session.Session{
 		ID:      "test01",
-		Date:    date,
+		Date:    &date,
 		Topic:   topic,
 		Tags:    tags,
 		Agent:   "claude-code",

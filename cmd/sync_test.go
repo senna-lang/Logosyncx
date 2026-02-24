@@ -58,10 +58,11 @@ func TestSync_IndexesSessions(t *testing.T) {
 	dir := setupInitedProject(t)
 
 	date := time.Date(2025, 2, 20, 10, 0, 0, 0, time.UTC)
+	dateMinus1 := date.Add(-24 * time.Hour)
 	sessions := []session.Session{
 		{
 			ID:      "id1",
-			Date:    date,
+			Date:    &date,
 			Topic:   "auth-flow",
 			Tags:    []string{"auth", "jwt"},
 			Agent:   "claude-code",
@@ -70,7 +71,7 @@ func TestSync_IndexesSessions(t *testing.T) {
 		},
 		{
 			ID:      "id2",
-			Date:    date.Add(-24 * time.Hour),
+			Date:    &dateMinus1,
 			Topic:   "db-schema",
 			Tags:    []string{"postgres"},
 			Agent:   "claude-code",
@@ -151,9 +152,10 @@ func TestSync_OverwritesStaleIndex(t *testing.T) {
 	}
 
 	// Write one real session.
+	realDate := time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)
 	s := session.Session{
 		ID:      "real1",
-		Date:    time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC),
+		Date:    &realDate,
 		Topic:   "real-topic",
 		Tags:    []string{},
 		Agent:   "claude-code",
@@ -191,7 +193,7 @@ func TestSync_IndexEntry_HasCorrectFields(t *testing.T) {
 	date := time.Date(2025, 4, 10, 9, 0, 0, 0, time.UTC)
 	s := session.Session{
 		ID:      "abc123",
-		Date:    date,
+		Date:    &date,
 		Topic:   "field-check",
 		Tags:    []string{"go", "testing"},
 		Agent:   "claude-code",
@@ -243,9 +245,10 @@ func TestSync_IndexEntry_HasCorrectFields(t *testing.T) {
 func TestSync_Idempotent(t *testing.T) {
 	dir := setupInitedProject(t)
 
+	idemDate := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	s := session.Session{
 		ID:      "idem1",
-		Date:    time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		Date:    &idemDate,
 		Topic:   "idempotent-test",
 		Tags:    []string{},
 		Agent:   "claude-code",

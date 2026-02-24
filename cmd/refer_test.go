@@ -20,7 +20,7 @@ func setupProjectWithSession(t *testing.T, s session.Session) string {
 func makeReferSession(id, topic string, tags []string, date time.Time) session.Session {
 	return session.Session{
 		ID:      id,
-		Date:    date,
+		Date:    &date,
 		Topic:   topic,
 		Tags:    tags,
 		Agent:   "claude-code",

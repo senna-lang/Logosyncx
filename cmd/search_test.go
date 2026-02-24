@@ -15,7 +15,7 @@ import (
 func makeSearchSession(id, topic string, tags []string, excerpt string, date time.Time) session.Session {
 	return session.Session{
 		ID:      id,
-		Date:    date,
+		Date:    &date,
 		Topic:   topic,
 		Tags:    tags,
 		Agent:   "claude-code",

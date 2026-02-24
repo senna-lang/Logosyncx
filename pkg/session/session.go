@@ -25,12 +25,12 @@ const (
 // Session represents a single saved conversation context file.
 type Session struct {
 	// Frontmatter fields
-	ID      string    `yaml:"id"`
-	Date    time.Time `yaml:"date"`
-	Topic   string    `yaml:"topic"`
-	Tags    []string  `yaml:"tags"`
-	Agent   string    `yaml:"agent"`
-	Related []string  `yaml:"related"`
+	ID      string     `yaml:"id"`
+	Date    *time.Time `yaml:"date,omitempty"`
+	Topic   string     `yaml:"topic"`
+	Tags    []string   `yaml:"tags"`
+	Agent   string     `yaml:"agent"`
+	Related []string   `yaml:"related"`
 
 	// Derived fields (not written to frontmatter)
 	Filename string `yaml:"-"`
@@ -50,8 +50,13 @@ func FilePath(projectRoot string, s Session) string {
 }
 
 // FileName returns the canonical filename for a session: <date>_<topic>.md
+// If Date is nil, the current time is used as a fallback.
 func FileName(s Session) string {
-	date := s.Date.Format("2006-01-02")
+	t := time.Now()
+	if s.Date != nil {
+		t = *s.Date
+	}
+	date := t.Format("2006-01-02")
 	topic := sanitizeTopic(s.Topic)
 	return fmt.Sprintf("%s_%s.md", date, topic)
 }
@@ -84,7 +89,11 @@ func Parse(filename string, data []byte) (Session, error) {
 
 	var s Session
 	if err := yaml.Unmarshal(fm, &s); err != nil {
-		return Session{}, fmt.Errorf("parse frontmatter in %s: %w", filename, err)
+		hint := ""
+		if bytes.Contains(fm, []byte("{{")) {
+			hint = " (hint: frontmatter contains '{{' — replace template placeholders before saving)"
+		}
+		return Session{}, fmt.Errorf("parse frontmatter in %s: %w%s", filename, err, hint)
 	}
 
 	s.Filename = filename

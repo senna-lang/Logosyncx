@@ -1,6 +1,4 @@
 ---
-id: {{id}}
-date: {{date}}
 topic: {{topic}}
 tags: []
 agent:

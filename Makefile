@@ -1,4 +1,4 @@
-.PHONY: setup fmt lint test build clean
+.PHONY: setup fmt lint test build install clean
 
 ## setup: configure git hooks path to scripts/hooks
 setup:
@@ -16,6 +16,10 @@ lint:
 ## test: run all tests
 test:
 	go test ./...
+
+## install: install the logos binary to GOPATH/bin
+install:
+	go install .
 
 ## build: build the logos binary
 build:

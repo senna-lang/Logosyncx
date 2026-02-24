@@ -11,9 +11,10 @@ import (
 // --- helpers -----------------------------------------------------------------
 
 func makeSession(topic string, tags []string) Session {
+	d := time.Date(2025, 2, 20, 10, 30, 0, 0, time.UTC)
 	return Session{
 		ID:      "abc123",
-		Date:    time.Date(2025, 2, 20, 10, 30, 0, 0, time.UTC),
+		Date:    &d,
 		Topic:   topic,
 		Tags:    tags,
 		Agent:   "claude-code",

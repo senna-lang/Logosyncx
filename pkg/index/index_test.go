@@ -36,7 +36,7 @@ func writeSessionFile(t *testing.T, projectRoot string, s session.Session) {
 func makeSession(id, topic string, tags []string, date time.Time) session.Session {
 	return session.Session{
 		ID:      id,
-		Date:    date,
+		Date:    &date,
 		Topic:   topic,
 		Tags:    tags,
 		Agent:   "claude-code",
@@ -62,7 +62,7 @@ func TestFromSession_CopiesAllFields(t *testing.T) {
 	s := session.Session{
 		ID:       "abc123",
 		Filename: "2025-02-20_auth.md",
-		Date:     date,
+		Date:     &date,
 		Topic:    "auth",
 		Tags:     []string{"jwt", "security"},
 		Agent:    "claude-code",
@@ -77,8 +77,8 @@ func TestFromSession_CopiesAllFields(t *testing.T) {
 	if e.Filename != s.Filename {
 		t.Errorf("Filename = %q, want %q", e.Filename, s.Filename)
 	}
-	if !e.Date.Equal(s.Date) {
-		t.Errorf("Date = %v, want %v", e.Date, s.Date)
+	if !e.Date.Equal(*s.Date) {
+		t.Errorf("Date = %v, want %v", e.Date, *s.Date)
 	}
 	if e.Topic != s.Topic {
 		t.Errorf("Topic = %q, want %q", e.Topic, s.Topic)
@@ -373,7 +373,7 @@ func TestRebuild_PopulatesExcerpt(t *testing.T) {
 	date := time.Date(2025, 2, 20, 10, 0, 0, 0, time.UTC)
 	s := session.Session{
 		ID:      "exc1",
-		Date:    date,
+		Date:    &date,
 		Topic:   "excerpt-test",
 		Tags:    []string{},
 		Related: []string{},

@@ -50,10 +50,14 @@ func FromSession(s session.Session) Entry {
 	if related == nil {
 		related = []string{}
 	}
+	date := time.Now()
+	if s.Date != nil {
+		date = *s.Date
+	}
 	return Entry{
 		ID:       s.ID,
 		Filename: s.Filename,
-		Date:     s.Date,
+		Date:     date,
 		Topic:    s.Topic,
 		Tags:     tags,
 		Agent:    s.Agent,

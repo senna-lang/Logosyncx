@@ -2,7 +2,7 @@
 id: t-10bead
 date: 2026-02-21T23:38:55.938086+09:00
 title: Fix logos save UX issues from agent feedback
-status: open
+status: done
 priority: high
 session: 2026-02-21_logosyncx-ux-feedback.md
 tags:
