@@ -238,7 +238,7 @@ func TestRefer_Summary_ReturnsOnlySummarySections(t *testing.T) {
 
 	// Ensure config has the default summary sections.
 	cfg, _ := config.Load(dir)
-	cfg.Save.SummarySections = []string{"Summary", "Key Decisions"}
+	cfg.Sessions.SummarySections = []string{"Summary", "Key Decisions"}
 	_ = config.Save(dir, cfg)
 
 	out := captureOutput(t, func() {
@@ -264,7 +264,7 @@ func TestRefer_Summary_ExcludesBodyNotInSections(t *testing.T) {
 	dir := setupProjectWithSession(t, s)
 
 	cfg, _ := config.Load(dir)
-	cfg.Save.SummarySections = []string{"Summary"}
+	cfg.Sessions.SummarySections = []string{"Summary"}
 	_ = config.Save(dir, cfg)
 
 	out := captureOutput(t, func() {
@@ -286,7 +286,7 @@ func TestRefer_Summary_DoesNotIncludeFrontmatter(t *testing.T) {
 	dir := setupProjectWithSession(t, s)
 
 	cfg, _ := config.Load(dir)
-	cfg.Save.SummarySections = []string{"Summary"}
+	cfg.Sessions.SummarySections = []string{"Summary"}
 	_ = config.Save(dir, cfg)
 
 	out := captureOutput(t, func() {

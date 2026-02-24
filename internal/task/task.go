@@ -119,10 +119,25 @@ func IsValidPriority(p Priority) bool {
 	return false
 }
 
+// ParseOptions controls optional behaviour of Parse.
+type ParseOptions struct {
+	// ExcerptSection is the heading name used to extract the excerpt.
+	// Defaults to "What" when empty. Matched case-insensitively at any
+	// heading level (h1–h6).
+	ExcerptSection string
+}
+
 // Parse reads a task markdown file from data.
 // The file must start with a YAML frontmatter block delimited by "---".
 // filename is stored on the returned Task for display purposes.
 func Parse(filename string, data []byte) (Task, error) {
+	return ParseWithOptions(filename, data, ParseOptions{})
+}
+
+// ParseWithOptions is like Parse but accepts options to customise excerpt
+// extraction. Use this when the project's tasks.excerpt_section differs from
+// the default "What".
+func ParseWithOptions(filename string, data []byte, opts ParseOptions) (Task, error) {
 	fm, body, err := splitFrontmatter(data)
 	if err != nil {
 		return Task{}, fmt.Errorf("parse %s: %w", filename, err)
@@ -135,7 +150,7 @@ func Parse(filename string, data []byte) (Task, error) {
 
 	t.Filename = filename
 	t.Body = string(body)
-	t.Excerpt = extractExcerpt(body)
+	t.Excerpt = extractExcerpt(body, opts.ExcerptSection)
 
 	return t, nil
 }
@@ -256,29 +271,37 @@ func splitFrontmatter(data []byte) (frontmatter, body []byte, err error) {
 	return []byte(fm), []byte(remainder), nil
 }
 
-// extractExcerpt returns the first excerptMaxRunes runes of the ## What
-// section content (stripped of the heading line itself and blank lines).
-// Falls back to the beginning of the body if no ## What section is found.
-func extractExcerpt(body []byte) string {
+// extractExcerpt returns the first excerptMaxRunes runes of the named excerpt
+// section's content (stripped of the heading line itself and blank lines).
+// The section is matched by name only — any heading level (h1–h6) is accepted.
+// The section ends when a heading at the same or higher level is encountered.
+// If excerptSection is empty it defaults to "What".
+// Falls back to the beginning of the body if the named section is not found.
+func extractExcerpt(body []byte, excerptSection string) string {
+	if excerptSection == "" {
+		excerptSection = "What"
+	}
 	text := string(body)
 	lines := strings.Split(text, "\n")
 
-	inWhat := false
+	inSection := false
+	currentLevel := 0
 	var content strings.Builder
 
 	for _, line := range lines {
 		if heading, level, ok := parseHeading(line); ok {
-			if inWhat {
-				if level <= 2 {
+			if inSection {
+				if level <= currentLevel {
 					break
 				}
 			}
-			if level == 2 && strings.EqualFold(strings.TrimSpace(heading), "what") {
-				inWhat = true
+			if strings.EqualFold(strings.TrimSpace(heading), excerptSection) {
+				inSection = true
+				currentLevel = level
 				continue
 			}
 		}
-		if inWhat {
+		if inSection {
 			content.WriteString(line)
 			content.WriteByte('\n')
 		}

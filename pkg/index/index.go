@@ -134,10 +134,13 @@ func Append(projectRoot string, e Entry) error {
 // created, even when there are no sessions, so that subsequent ReadAll calls
 // succeed without triggering another rebuild.
 //
+// excerptSection is the heading name used to extract each session's excerpt
+// (e.g. cfg.Sessions.ExcerptSection).  An empty string falls back to "Summary".
+//
 // The first return value is the number of sessions successfully indexed.
 // A non-nil error indicates either an I/O failure (fatal) or parse warnings
 // from session files (non-fatal, sessions still indexed where possible).
-func Rebuild(projectRoot string) (int, error) {
+func Rebuild(projectRoot string, excerptSection string) (int, error) {
 	path := FilePath(projectRoot)
 
 	// Always create / truncate the index file so it exists after this call.
@@ -145,9 +148,11 @@ func Rebuild(projectRoot string) (int, error) {
 		return 0, fmt.Errorf("create index: %w", err)
 	}
 
-	// Load all sessions from disk; LoadAll returns partial results on
-	// parse errors so we index as many as possible.
-	sessions, loadErr := session.LoadAll(projectRoot)
+	// Load all sessions from disk; LoadAllWithOptions returns partial results
+	// on parse errors so we index as many as possible.
+	sessions, loadErr := session.LoadAllWithOptions(projectRoot, session.ParseOptions{
+		ExcerptSection: excerptSection,
+	})
 
 	for _, s := range sessions {
 		if err := Append(projectRoot, FromSession(s)); err != nil {

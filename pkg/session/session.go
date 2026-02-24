@@ -132,6 +132,12 @@ func LoadFile(path string) (Session, error) {
 // and returns the parsed sessions. Files that fail to parse are skipped and
 // their errors collected into a combined error (non-fatal).
 func LoadAll(projectRoot string) ([]Session, error) {
+	return LoadAllWithOptions(projectRoot, ParseOptions{})
+}
+
+// LoadAllWithOptions is like LoadAll but parses each file with the given
+// ParseOptions (e.g. a custom ExcerptSection from the project config).
+func LoadAllWithOptions(projectRoot string, opts ParseOptions) ([]Session, error) {
 	dir := SessionsDir(projectRoot)
 
 	entries, err := os.ReadDir(dir)
@@ -151,7 +157,12 @@ func LoadAll(projectRoot string) ([]Session, error) {
 		}
 
 		path := filepath.Join(dir, entry.Name())
-		s, err := LoadFile(path)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", entry.Name(), err))
+			continue
+		}
+		s, err := ParseWithOptions(entry.Name(), data, opts)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", entry.Name(), err))
 			continue

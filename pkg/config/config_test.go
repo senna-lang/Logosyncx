@@ -19,7 +19,7 @@ func TestDefault(t *testing.T) {
 	if cfg.AgentsFile != "AGENTS.md" {
 		t.Errorf("expected agents_file 'AGENTS.md', got %q", cfg.AgentsFile)
 	}
-	if len(cfg.Save.SummarySections) == 0 {
+	if len(cfg.Sessions.SummarySections) == 0 {
 		t.Error("expected non-empty summary_sections")
 	}
 	if cfg.Privacy.FilterPatterns == nil {
@@ -57,7 +57,7 @@ func TestLoad_ValidFile(t *testing.T) {
 		"version": "1",
 		"project": "test-proj",
 		"agents_file": "CLAUDE.md",
-		"save": {
+		"sessions": {
 			"summary_sections": ["Summary", "Decisions", "Action Items"]
 		},
 		"privacy": {
@@ -84,8 +84,8 @@ func TestLoad_ValidFile(t *testing.T) {
 	if cfg.AgentsFile != "CLAUDE.md" {
 		t.Errorf("expected agents_file 'CLAUDE.md', got %q", cfg.AgentsFile)
 	}
-	if len(cfg.Save.SummarySections) != 3 {
-		t.Errorf("expected 3 summary_sections, got %d", len(cfg.Save.SummarySections))
+	if len(cfg.Sessions.SummarySections) != 3 {
+		t.Errorf("expected 3 summary_sections, got %d", len(cfg.Sessions.SummarySections))
 	}
 	if len(cfg.Privacy.FilterPatterns) != 1 {
 		t.Errorf("expected 1 filter_pattern, got %d", len(cfg.Privacy.FilterPatterns))
@@ -134,7 +134,7 @@ func TestLoad_AppliesDefaults(t *testing.T) {
 	if cfg.AgentsFile != "AGENTS.md" {
 		t.Errorf("expected default agents_file 'AGENTS.md', got %q", cfg.AgentsFile)
 	}
-	if len(cfg.Save.SummarySections) == 0 {
+	if len(cfg.Sessions.SummarySections) == 0 {
 		t.Error("expected default summary_sections to be applied")
 	}
 	if cfg.Privacy.FilterPatterns == nil {
@@ -218,7 +218,7 @@ func TestSave_RoundTrip(t *testing.T) {
 		Version:    "1",
 		Project:    "roundtrip-proj",
 		AgentsFile: "CLAUDE.md",
-		Save: SaveConfig{
+		Sessions: SessionsConfig{
 			SummarySections: []string{"Summary", "Key Decisions", "Action Items"},
 		},
 		Privacy: PrivacyConfig{
@@ -244,13 +244,13 @@ func TestSave_RoundTrip(t *testing.T) {
 	if loaded.AgentsFile != original.AgentsFile {
 		t.Errorf("agents_file mismatch: got %q, want %q", loaded.AgentsFile, original.AgentsFile)
 	}
-	if len(loaded.Save.SummarySections) != len(original.Save.SummarySections) {
+	if len(loaded.Sessions.SummarySections) != len(original.Sessions.SummarySections) {
 		t.Errorf("summary_sections length mismatch: got %d, want %d",
-			len(loaded.Save.SummarySections), len(original.Save.SummarySections))
+			len(loaded.Sessions.SummarySections), len(original.Sessions.SummarySections))
 	}
-	for i, s := range original.Save.SummarySections {
-		if loaded.Save.SummarySections[i] != s {
-			t.Errorf("summary_sections[%d]: got %q, want %q", i, loaded.Save.SummarySections[i], s)
+	for i, s := range original.Sessions.SummarySections {
+		if loaded.Sessions.SummarySections[i] != s {
+			t.Errorf("summary_sections[%d]: got %q, want %q", i, loaded.Sessions.SummarySections[i], s)
 		}
 	}
 	if len(loaded.Privacy.FilterPatterns) != len(original.Privacy.FilterPatterns) {

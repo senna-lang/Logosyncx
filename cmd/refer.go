@@ -104,7 +104,7 @@ func printRefer(s session.Session, summaryOnly bool, root string) error {
 		if err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}
-		out := session.ExtractSections(s.Body, cfg.Save.SummarySections)
+		out := session.ExtractSections(s.Body, cfg.Sessions.SummarySections)
 		if out == "" {
 			fmt.Fprintln(os.Stderr, "warning: no matching summary sections found in this session")
 		}

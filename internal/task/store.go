@@ -135,6 +135,12 @@ func (s *Store) Save(t *Task, body string) (string, error) {
 	}
 	if t.Status == "" {
 		t.Status = Status(s.cfg.Tasks.DefaultStatus)
+		if !IsValidStatus(t.Status) {
+			fmt.Fprintf(os.Stderr,
+				"warning: config tasks.default_status %q is not a valid status — falling back to %q\n",
+				t.Status, StatusOpen)
+			t.Status = StatusOpen
+		}
 	}
 	if t.Priority == "" {
 		t.Priority = Priority(s.cfg.Tasks.DefaultPriority)
@@ -379,7 +385,9 @@ func (s *Store) loadFile(path string) (*Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	t, err := Parse(filepath.Base(path), data)
+	t, err := ParseWithOptions(filepath.Base(path), data, ParseOptions{
+		ExcerptSection: s.cfg.Tasks.ExcerptSection,
+	})
 	if err != nil {
 		return nil, err
 	}

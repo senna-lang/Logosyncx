@@ -2,7 +2,7 @@
 	"version": "1",
 	"project": "logosyncx",
 	"agents_file": "CLAUDE.md",
-	"save": {
+	"sessions": {
 		"summary_sections": ["Summary", "Key Decisions"],
 		"excerpt_section": "Summary",
 		"sections": [
@@ -17,6 +17,7 @@
 		"default_status": "open",
 		"default_priority": "medium",
 		"summary_sections": ["What", "Checklist"],
+		"excerpt_section": "What",
 		"sections": [
 			{ "name": "What", "level": 2, "required": true },
 			{ "name": "Why", "level": 2, "required": false },

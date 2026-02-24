@@ -108,7 +108,7 @@ func runSave(topic string, tags []string, agent string, related []string, body s
 	warnPrivacy(s.Body, cfg.Privacy.FilterPatterns)
 
 	// Warn if required sections are missing from the body.
-	warnMissingSections(s.Body, cfg.Save.Sections)
+	warnMissingSections(s.Body, cfg.Sessions.Sections)
 
 	// Write the session file.
 	savedPath, err := session.Write(root, s)
@@ -126,7 +126,7 @@ func runSave(topic string, tags []string, agent string, related []string, body s
 			data, _ := os.ReadFile(savedPath)
 			return data
 		}(),
-		session.ParseOptions{ExcerptSection: cfg.Save.ExcerptSection},
+		session.ParseOptions{ExcerptSection: cfg.Sessions.ExcerptSection},
 	)
 	if loadErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not load saved session for indexing (%v)\n", loadErr)

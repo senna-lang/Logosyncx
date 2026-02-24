@@ -246,6 +246,9 @@ func runTaskRefer(nameOrPartial string, summary, withSession bool) error {
 
 	if summary {
 		sections := task.ExtractSections(t.Body, cfg.Tasks.SummarySections)
+		if sections == "" {
+			fmt.Fprintln(os.Stderr, "warning: no matching summary sections found in this task")
+		}
 		fmt.Println(sections)
 	} else {
 		// Print frontmatter + body.
@@ -265,7 +268,7 @@ func runTaskRefer(nameOrPartial string, summary, withSession bool) error {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not load linked session %q: %v\n", t.Session, err)
 		} else {
-			sections := session.ExtractSections(s.Body, cfg.Save.SummarySections)
+			sections := session.ExtractSections(s.Body, cfg.Sessions.SummarySections)
 			fmt.Println(sections)
 		}
 	}

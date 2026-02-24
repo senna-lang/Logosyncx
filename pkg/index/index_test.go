@@ -296,7 +296,7 @@ func TestAppend_PreservesExistingEntries(t *testing.T) {
 
 func TestRebuild_EmptySessions_CreatesEmptyIndex(t *testing.T) {
 	dir := setupProject(t)
-	n, err := Rebuild(dir)
+	n, err := Rebuild(dir, "")
 	if err != nil {
 		t.Fatalf("Rebuild: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestRebuild_IndexesAllSessions(t *testing.T) {
 	writeSessionFile(t, dir, makeSession("id1", "auth-flow", []string{"auth"}, date))
 	writeSessionFile(t, dir, makeSession("id2", "db-schema", []string{"postgres"}, date.Add(-24*time.Hour)))
 
-	n, err := Rebuild(dir)
+	n, err := Rebuild(dir, "")
 	if err != nil {
 		t.Fatalf("Rebuild: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestRebuild_OverwritesExistingIndex(t *testing.T) {
 
 	// Now write one real session and rebuild.
 	writeSessionFile(t, dir, makeSession("fresh", "new-topic", []string{}, date))
-	n, err := Rebuild(dir)
+	n, err := Rebuild(dir, "")
 	if err != nil {
 		t.Fatalf("Rebuild: %v", err)
 	}
@@ -381,7 +381,7 @@ func TestRebuild_PopulatesExcerpt(t *testing.T) {
 	}
 	writeSessionFile(t, dir, s)
 
-	if _, err := Rebuild(dir); err != nil {
+	if _, err := Rebuild(dir, ""); err != nil {
 		t.Fatalf("Rebuild: %v", err)
 	}
 
@@ -404,7 +404,7 @@ func TestRebuild_NoSessionsDir_ReturnsZero(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	n, err := Rebuild(dir)
+	n, err := Rebuild(dir, "")
 	if err != nil {
 		t.Fatalf("Rebuild with no sessions dir: %v", err)
 	}

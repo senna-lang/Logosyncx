@@ -294,7 +294,7 @@ func TestFileName_SpecialCharsStripped(t *testing.T) {
 
 func TestExtractExcerpt_FromWhatSection(t *testing.T) {
 	body := []byte("## What\nThis is the what section.\n\n## Why\nThis is why.\n")
-	got := extractExcerpt(body)
+	got := extractExcerpt(body, "")
 	if !strings.Contains(got, "what section") {
 		t.Errorf("excerpt = %q, expected content from ## What", got)
 	}
@@ -305,7 +305,7 @@ func TestExtractExcerpt_FromWhatSection(t *testing.T) {
 
 func TestExtractExcerpt_FallbackToBody(t *testing.T) {
 	body := []byte("## Why\nNo What section here.\n")
-	got := extractExcerpt(body)
+	got := extractExcerpt(body, "")
 	if got == "" {
 		t.Error("expected non-empty fallback excerpt")
 	}
@@ -313,7 +313,7 @@ func TestExtractExcerpt_FallbackToBody(t *testing.T) {
 
 func TestExtractExcerpt_EmptyWhatSection_FallsBack(t *testing.T) {
 	body := []byte("## What\n\n## Why\nSome content.\n")
-	got := extractExcerpt(body)
+	got := extractExcerpt(body, "")
 	if got == "" {
 		t.Error("expected non-empty fallback excerpt")
 	}
@@ -322,7 +322,7 @@ func TestExtractExcerpt_EmptyWhatSection_FallsBack(t *testing.T) {
 func TestExtractExcerpt_TruncatesLongContent(t *testing.T) {
 	long := strings.Repeat("a", 400)
 	body := []byte("## What\n" + long + "\n")
-	got := extractExcerpt(body)
+	got := extractExcerpt(body, "")
 	// +1 accounts for the appended ellipsis rune
 	if len([]rune(got)) > excerptMaxRunes+1 {
 		t.Errorf("excerpt not truncated: rune length = %d", len([]rune(got)))
@@ -334,7 +334,7 @@ func TestExtractExcerpt_TruncatesLongContent(t *testing.T) {
 
 func TestExtractExcerpt_ShortContentNotTruncated(t *testing.T) {
 	body := []byte("## What\nShort content.\n")
-	got := extractExcerpt(body)
+	got := extractExcerpt(body, "")
 	if strings.HasSuffix(got, "…") {
 		t.Errorf("short excerpt should not be truncated, got: %q", got)
 	}

@@ -46,7 +46,7 @@ func runSync() error {
 
 	// --- sessions ------------------------------------------------------------
 	fmt.Println("Rebuilding session index from sessions/...")
-	n, err := index.Rebuild(root)
+	n, err := index.Rebuild(root, cfg.Sessions.ExcerptSection)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 	}

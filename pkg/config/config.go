@@ -23,8 +23,8 @@ type SectionConfig struct {
 	Required bool   `json:"required"`
 }
 
-// SaveConfig holds settings related to session saving.
-type SaveConfig struct {
+// SessionsConfig holds settings related to session files.
+type SessionsConfig struct {
 	// SummarySections lists the section headings returned by logos refer --summary.
 	SummarySections []string `json:"summary_sections"`
 	// ExcerptSection is the section whose content is used as the session excerpt
@@ -43,6 +43,10 @@ type TasksConfig struct {
 	DefaultStatus   string   `json:"default_status"`
 	DefaultPriority string   `json:"default_priority"`
 	SummarySections []string `json:"summary_sections"`
+	// ExcerptSection is the section whose content is used as the task excerpt
+	// stored in the task index. Defaults to "What". Renaming this after tasks
+	// have been saved breaks index consistency (same caveat as sessions).
+	ExcerptSection string `json:"excerpt_section"`
 	// Sections defines the ordered list of body sections for task files.
 	// Sections with Required:true will trigger a warning if absent when creating
 	// a task. These sections are not used for indexing, so all sections are freely
@@ -65,13 +69,13 @@ type PrivacyConfig struct {
 
 // Config represents the contents of .logosyncx/config.json.
 type Config struct {
-	Version    string        `json:"version"`
-	Project    string        `json:"project"`
-	AgentsFile string        `json:"agents_file"`
-	Save       SaveConfig    `json:"save"`
-	Tasks      TasksConfig   `json:"tasks"`
-	Privacy    PrivacyConfig `json:"privacy"`
-	Git        GitConfig     `json:"git"`
+	Version    string         `json:"version"`
+	Project    string         `json:"project"`
+	AgentsFile string         `json:"agents_file"`
+	Sessions   SessionsConfig `json:"sessions"`
+	Tasks      TasksConfig    `json:"tasks"`
+	Privacy    PrivacyConfig  `json:"privacy"`
+	Git        GitConfig      `json:"git"`
 }
 
 // defaultSessionSections mirrors the sections that were previously defined in
@@ -101,7 +105,7 @@ func Default(projectName string) Config {
 		Version:    "1",
 		Project:    projectName,
 		AgentsFile: "AGENTS.md",
-		Save: SaveConfig{
+		Sessions: SessionsConfig{
 			SummarySections: []string{"Summary", "Key Decisions"},
 			ExcerptSection:  "Summary",
 			Sections:        defaultSessionSections,
@@ -110,6 +114,7 @@ func Default(projectName string) Config {
 			DefaultStatus:   "open",
 			DefaultPriority: "medium",
 			SummarySections: []string{"What", "Checklist"},
+			ExcerptSection:  "What",
 			Sections:        defaultTaskSections,
 		},
 		Privacy: PrivacyConfig{
@@ -174,14 +179,14 @@ func applyDefaults(cfg *Config, projectRoot string) {
 	if cfg.AgentsFile == "" {
 		cfg.AgentsFile = "AGENTS.md"
 	}
-	if len(cfg.Save.SummarySections) == 0 {
-		cfg.Save.SummarySections = []string{"Summary", "Key Decisions"}
+	if len(cfg.Sessions.SummarySections) == 0 {
+		cfg.Sessions.SummarySections = []string{"Summary", "Key Decisions"}
 	}
-	if cfg.Save.ExcerptSection == "" {
-		cfg.Save.ExcerptSection = "Summary"
+	if cfg.Sessions.ExcerptSection == "" {
+		cfg.Sessions.ExcerptSection = "Summary"
 	}
-	if len(cfg.Save.Sections) == 0 {
-		cfg.Save.Sections = defaultSessionSections
+	if len(cfg.Sessions.Sections) == 0 {
+		cfg.Sessions.Sections = defaultSessionSections
 	}
 	if cfg.Tasks.DefaultStatus == "" {
 		cfg.Tasks.DefaultStatus = "open"
@@ -191,6 +196,9 @@ func applyDefaults(cfg *Config, projectRoot string) {
 	}
 	if len(cfg.Tasks.SummarySections) == 0 {
 		cfg.Tasks.SummarySections = []string{"What", "Checklist"}
+	}
+	if cfg.Tasks.ExcerptSection == "" {
+		cfg.Tasks.ExcerptSection = "What"
 	}
 	if len(cfg.Tasks.Sections) == 0 {
 		cfg.Tasks.Sections = defaultTaskSections

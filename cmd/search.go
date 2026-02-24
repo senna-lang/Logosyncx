@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/senna-lang/logosyncx/internal/project"
+	"github.com/senna-lang/logosyncx/pkg/config"
 	"github.com/senna-lang/logosyncx/pkg/index"
 	"github.com/spf13/cobra"
 )
@@ -46,7 +47,12 @@ func runSearch(keyword, tag string) error {
 		if errors.Is(err, os.ErrNotExist) {
 			// Auto-rebuild: inform the user and build the index on the fly.
 			fmt.Fprintln(os.Stderr, "index.jsonl not found. Building index from sessions/...")
-			n, buildErr := index.Rebuild(root)
+			cfg, cfgErr := config.Load(root)
+			if cfgErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not load config (%v) — using defaults\n", cfgErr)
+				cfg = config.Default("")
+			}
+			n, buildErr := index.Rebuild(root, cfg.Sessions.ExcerptSection)
 			if buildErr != nil {
 				fmt.Fprintf(os.Stderr, "warning: %v\n", buildErr)
 			}

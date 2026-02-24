@@ -162,19 +162,19 @@ func TestInit_ConfigHasSessionSections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to load config: %v", err)
 	}
-	if len(cfg.Save.Sections) == 0 {
+	if len(cfg.Sessions.Sections) == 0 {
 		t.Fatal("expected save.sections to be populated in config.json")
 	}
 	// Summary must be the first section and required.
-	first := cfg.Save.Sections[0]
+	first := cfg.Sessions.Sections[0]
 	if first.Name != "Summary" {
 		t.Errorf("first session section should be 'Summary', got %q", first.Name)
 	}
 	if !first.Required {
 		t.Error("Summary section should be required")
 	}
-	if cfg.Save.ExcerptSection != "Summary" {
-		t.Errorf("excerpt_section should be 'Summary', got %q", cfg.Save.ExcerptSection)
+	if cfg.Sessions.ExcerptSection != "Summary" {
+		t.Errorf("excerpt_section should be 'Summary', got %q", cfg.Sessions.ExcerptSection)
 	}
 }
 
