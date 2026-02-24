@@ -2,7 +2,7 @@
 id: t-de9b87
 date: 2026-02-24T20:33:24.96172+09:00
 title: logos sync should migrate config.json with new default fields
-status: open
+status: done
 priority: medium
 session: ""
 tags:

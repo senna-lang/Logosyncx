@@ -180,6 +180,11 @@ func (s *Store) Save(t *Task, body string) (string, error) {
 	// Best-effort index append.
 	_ = AppendTaskIndex(s.projectRoot, t.ToJSON())
 
+	// Stage the updated index file.
+	if s.cfg.Git.AutoPush {
+		_ = gitutil.Add(s.projectRoot, TaskIndexFilePath(s.projectRoot))
+	}
+
 	return path, nil
 }
 
@@ -245,6 +250,11 @@ func (s *Store) UpdateFields(nameOrPartial string, fields map[string]string) err
 	// Rebuild index to reflect updated field values (best-effort).
 	_, _ = s.RebuildTaskIndex()
 
+	// Stage the updated index file.
+	if s.cfg.Git.AutoPush {
+		_ = gitutil.Add(s.projectRoot, TaskIndexFilePath(s.projectRoot))
+	}
+
 	return nil
 }
 
@@ -267,6 +277,11 @@ func (s *Store) Delete(nameOrPartial string) error {
 
 	// Rebuild index to remove the deleted entry (best-effort).
 	_, _ = s.RebuildTaskIndex()
+
+	// Stage the updated index file.
+	if s.cfg.Git.AutoPush {
+		_ = gitutil.Add(s.projectRoot, TaskIndexFilePath(s.projectRoot))
+	}
 
 	return nil
 }
@@ -301,6 +316,11 @@ func (s *Store) Purge(status Status) (int, error) {
 
 	if count > 0 {
 		_, _ = s.RebuildTaskIndex()
+
+		// Stage the updated index file.
+		if s.cfg.Git.AutoPush {
+			_ = gitutil.Add(s.projectRoot, TaskIndexFilePath(s.projectRoot))
+		}
 	}
 
 	return count, nil
