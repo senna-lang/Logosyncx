@@ -9,6 +9,24 @@ import (
 	"path/filepath"
 )
 
+// requiredSessionKeys lists the JSON keys that must be present in the
+// "sessions" object for a config.json to be considered up-to-date.
+var requiredSessionKeys = []string{
+	"summary_sections",
+	"excerpt_section",
+	"sections",
+}
+
+// requiredTaskKeys lists the JSON keys that must be present in the
+// "tasks" object for a config.json to be considered up-to-date.
+var requiredTaskKeys = []string{
+	"default_status",
+	"default_priority",
+	"summary_sections",
+	"excerpt_section",
+	"sections",
+}
+
 const (
 	DirName        = ".logosyncx"
 	ConfigFileName = "config.json"
@@ -166,6 +184,91 @@ func Save(projectRoot string, cfg Config) error {
 	data = append(data, '\n')
 
 	return os.WriteFile(ConfigPath(projectRoot), data, 0o644)
+}
+
+// Migrate checks whether any expected fields are absent from the on-disk
+// config.json and, if so, re-writes the file with all default values applied.
+// It returns (true, nil) when the file was updated, and (false, nil) when it
+// was already complete or when config.json does not exist (logos init creates
+// it from scratch, so there is nothing to migrate).
+//
+// Migrate is intentionally conservative: it only adds missing fields; it never
+// removes or overrides fields that are already present.
+func Migrate(projectRoot string) (bool, error) {
+	path := ConfigPath(projectRoot)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	// Parse the raw JSON to detect absent keys — this distinguishes a truly
+	// absent key from one that is present but set to a zero value.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		// Malformed JSON: leave the file alone and let Load surface the error.
+		return false, nil
+	}
+
+	if !isMigrationNeeded(raw) {
+		return false, nil
+	}
+
+	// Load applies applyDefaults in memory; Save writes the result back.
+	cfg, err := Load(projectRoot)
+	if err != nil {
+		return false, err
+	}
+	if err := Save(projectRoot, cfg); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// isMigrationNeeded returns true when any expected key is absent from the
+// parsed top-level or nested JSON objects.
+func isMigrationNeeded(raw map[string]json.RawMessage) bool {
+	// Top-level scalar fields.
+	for _, key := range []string{"version", "agents_file"} {
+		if _, ok := raw[key]; !ok {
+			return true
+		}
+	}
+
+	// sessions sub-keys.
+	sessRaw, ok := raw["sessions"]
+	if !ok {
+		return true
+	}
+	var sessMap map[string]json.RawMessage
+	if err := json.Unmarshal(sessRaw, &sessMap); err != nil {
+		return true
+	}
+	for _, key := range requiredSessionKeys {
+		if _, ok := sessMap[key]; !ok {
+			return true
+		}
+	}
+
+	// tasks sub-keys.
+	tasksRaw, ok := raw["tasks"]
+	if !ok {
+		return true
+	}
+	var tasksMap map[string]json.RawMessage
+	if err := json.Unmarshal(tasksRaw, &tasksMap); err != nil {
+		return true
+	}
+	for _, key := range requiredTaskKeys {
+		if _, ok := tasksMap[key]; !ok {
+			return true
+		}
+	}
+
+	return false
 }
 
 // applyDefaults fills in zero-value fields with sensible defaults.

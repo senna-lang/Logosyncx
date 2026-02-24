@@ -37,6 +37,14 @@ func runSync() error {
 		return err
 	}
 
+	// Migrate config.json first so that subsequent Load sees up-to-date fields.
+	changed, migrateErr := config.Migrate(root)
+	if migrateErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not migrate config (%v)\n", migrateErr)
+	} else if changed {
+		fmt.Println("✓ config.json migrated with new default fields")
+	}
+
 	// Load config up front so git automation settings are available throughout.
 	cfg, err := config.Load(root)
 	if err != nil {
