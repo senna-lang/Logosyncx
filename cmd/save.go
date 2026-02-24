@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -106,6 +107,9 @@ func runSave(topic string, tags []string, agent string, related []string, body s
 	// Check privacy filter patterns and warn on matches.
 	warnPrivacy(s.Body, cfg.Privacy.FilterPatterns)
 
+	// Warn if required sections are missing from the body.
+	warnMissingSections(s.Body, cfg.Save.Sections)
+
 	// Write the session file.
 	savedPath, err := session.Write(root, s)
 	if err != nil {
@@ -115,10 +119,19 @@ func runSave(topic string, tags []string, agent string, related []string, body s
 	fmt.Printf("✓ Saved session to %s\n", savedPath)
 
 	// Update the session index (append-only, best-effort).
-	savedSession, loadErr := session.LoadFile(savedPath)
+	// Use ParseWithOptions so the excerpt respects the project's excerpt_section.
+	savedSession, loadErr := session.ParseWithOptions(
+		savedPath,
+		func() []byte {
+			data, _ := os.ReadFile(savedPath)
+			return data
+		}(),
+		session.ParseOptions{ExcerptSection: cfg.Save.ExcerptSection},
+	)
 	if loadErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not load saved session for indexing (%v)\n", loadErr)
 	} else {
+		savedSession.Filename = filepath.Base(savedPath)
 		if indexErr := index.Append(root, index.FromSession(savedSession)); indexErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not update index (%v) — run `logos sync` to rebuild\n", indexErr)
 		}
@@ -173,6 +186,41 @@ func generateID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// warnMissingSections checks that every required section defined in the project
+// config is present in the body. A missing required section triggers a warning
+// (not an error) so the save is never blocked by structural issues.
+// Sections are matched by name only — any heading level (h1–h6) is accepted.
+func warnMissingSections(body string, sections []config.SectionConfig) {
+	for _, sec := range sections {
+		if !sec.Required {
+			continue
+		}
+		if !hasHeading(body, sec.Name) {
+			fmt.Fprintf(os.Stderr, "warning: required section %q is missing from the session body\n", sec.Name)
+		}
+	}
+}
+
+// hasHeading returns true if the body contains a markdown ATX heading whose
+// text matches name (case-insensitive) at any heading level (h1–h6).
+func hasHeading(body, name string) bool {
+	for _, line := range strings.Split(body, "\n") {
+		// Count leading '#' characters.
+		i := 0
+		for i < len(line) && line[i] == '#' {
+			i++
+		}
+		// Must have 1–6 hashes followed by a space.
+		if i == 0 || i > 6 || i >= len(line) || line[i] != ' ' {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(line[i+1:]), name) {
+			return true
+		}
+	}
+	return false
 }
 
 // warnPrivacy checks the session body against each compiled regex pattern

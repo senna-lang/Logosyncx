@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/senna-lang/logosyncx/pkg/config"
 )
 
 // helpers
@@ -117,21 +119,84 @@ func TestInit_CreatesUSAGEMD(t *testing.T) {
 	}
 }
 
-func TestInit_CreatesTemplateMD(t *testing.T) {
+func TestInit_USAGEMDIncludesTasksSection(t *testing.T) {
 	dir := t.TempDir()
 	if err := runInitInDir(t, dir); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	path := filepath.Join(dir, ".logosyncx", "template.md")
+	path := filepath.Join(dir, ".logosyncx", "USAGE.md")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("template.md not created: %v", err)
+		t.Fatalf("USAGE.md not created: %v", err)
 	}
-	if !strings.Contains(string(data), "{{topic}}") {
-		t.Error("template.md should contain {{topic}} placeholder")
+	content := string(data)
+	if !strings.Contains(content, "## Tasks") {
+		t.Error("USAGE.md should contain ## Tasks section")
 	}
-	if !strings.Contains(string(data), "## Summary") {
-		t.Error("template.md should contain ## Summary section")
+	if !strings.Contains(content, "logos task ls") {
+		t.Error("USAGE.md should contain logos task ls command reference")
+	}
+	if !strings.Contains(content, "logos task create") {
+		t.Error("USAGE.md should contain logos task create command reference")
+	}
+}
+
+func TestInit_DoesNotCreateTemplateMD(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInitInDir(t, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// template.md is abolished — section structure lives in config.json.
+	path := filepath.Join(dir, ".logosyncx", "template.md")
+	if _, err := os.Stat(path); err == nil {
+		t.Error("template.md should not be created by logos init (sections are in config.json)")
+	}
+}
+
+func TestInit_ConfigHasSessionSections(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInitInDir(t, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+	if len(cfg.Save.Sections) == 0 {
+		t.Fatal("expected save.sections to be populated in config.json")
+	}
+	// Summary must be the first section and required.
+	first := cfg.Save.Sections[0]
+	if first.Name != "Summary" {
+		t.Errorf("first session section should be 'Summary', got %q", first.Name)
+	}
+	if !first.Required {
+		t.Error("Summary section should be required")
+	}
+	if cfg.Save.ExcerptSection != "Summary" {
+		t.Errorf("excerpt_section should be 'Summary', got %q", cfg.Save.ExcerptSection)
+	}
+}
+
+func TestInit_ConfigHasTaskSections(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInitInDir(t, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+	if len(cfg.Tasks.Sections) == 0 {
+		t.Fatal("expected tasks.sections to be populated in config.json")
+	}
+	// What must be the first section and required.
+	first := cfg.Tasks.Sections[0]
+	if first.Name != "What" {
+		t.Errorf("first task section should be 'What', got %q", first.Name)
+	}
+	if !first.Required {
+		t.Error("What section should be required")
 	}
 }
 

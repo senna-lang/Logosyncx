@@ -223,7 +223,7 @@ func TestParse_InvalidYAML(t *testing.T) {
 
 func TestExtractExcerpt_FromSummarySection(t *testing.T) {
 	body := []byte("\n## Summary\nThis is the summary.\n\n## Key Decisions\n- decision\n")
-	got := extractExcerpt(body)
+	got := extractExcerpt(body, "Summary")
 	if !strings.Contains(got, "This is the summary.") {
 		t.Errorf("excerpt = %q, expected summary content", got)
 	}
@@ -234,7 +234,7 @@ func TestExtractExcerpt_FromSummarySection(t *testing.T) {
 
 func TestExtractExcerpt_FallbackToBody(t *testing.T) {
 	body := []byte("\n## Key Decisions\n- decision\n")
-	got := extractExcerpt(body)
+	got := extractExcerpt(body, "Summary")
 	if got == "" {
 		t.Error("expected non-empty excerpt fallback")
 	}
@@ -243,7 +243,7 @@ func TestExtractExcerpt_FallbackToBody(t *testing.T) {
 func TestExtractExcerpt_TruncatesLongContent(t *testing.T) {
 	long := strings.Repeat("a", 500)
 	body := []byte("\n## Summary\n" + long + "\n")
-	got := extractExcerpt(body)
+	got := extractExcerpt(body, "Summary")
 	if len([]rune(got)) > excerptMaxRunes+1 { // +1 for ellipsis
 		t.Errorf("excerpt length %d exceeds max %d", len([]rune(got)), excerptMaxRunes+1)
 	}
@@ -251,7 +251,7 @@ func TestExtractExcerpt_TruncatesLongContent(t *testing.T) {
 
 func TestExtractExcerpt_ShortContentNotTruncated(t *testing.T) {
 	body := []byte("\n## Summary\nShort summary.\n")
-	got := extractExcerpt(body)
+	got := extractExcerpt(body, "Summary")
 	if strings.HasSuffix(got, "…") {
 		t.Errorf("short excerpt should not be truncated, got: %q", got)
 	}

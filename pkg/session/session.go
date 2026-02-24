@@ -78,10 +78,26 @@ func sanitizeTopic(topic string) string {
 	return b.String()
 }
 
+// ParseOptions controls optional behaviour of Parse.
+type ParseOptions struct {
+	// ExcerptSection is the heading name used to extract the excerpt.
+	// Defaults to "Summary" when empty. Matched case-insensitively at any
+	// heading level (h1–h6).
+	ExcerptSection string
+}
+
 // Parse reads a session markdown file from data.
 // The file must start with a YAML frontmatter block delimited by "---".
 // The filename is stored as-is for display purposes.
+// The excerpt is extracted from the "Summary" section by default.
 func Parse(filename string, data []byte) (Session, error) {
+	return ParseWithOptions(filename, data, ParseOptions{})
+}
+
+// ParseWithOptions is like Parse but accepts options to customise excerpt
+// extraction. Use this when the project's excerpt_section differs from the
+// default "Summary".
+func ParseWithOptions(filename string, data []byte, opts ParseOptions) (Session, error) {
 	fm, body, err := splitFrontmatter(data)
 	if err != nil {
 		return Session{}, fmt.Errorf("parse %s: %w", filename, err)
@@ -98,7 +114,7 @@ func Parse(filename string, data []byte) (Session, error) {
 
 	s.Filename = filename
 	s.Body = string(body)
-	s.Excerpt = extractExcerpt(body)
+	s.Excerpt = extractExcerpt(body, opts.ExcerptSection)
 
 	return s, nil
 }
@@ -264,30 +280,44 @@ func splitFrontmatter(data []byte) (frontmatter, body []byte, err error) {
 	return []byte(fm), []byte(remainder), nil
 }
 
-// extractExcerpt returns the first excerptMaxRunes runes of the ## Summary
-// section content (stripped of the heading line itself and blank lines).
-// If no Summary section is found, it falls back to the beginning of the body.
-func extractExcerpt(body []byte) string {
+// ExtractExcerpt is the exported form of extractExcerpt, for use by callers
+// that have access to the project config (e.g. cmd/save.go) and need to
+// re-extract an excerpt with a project-specific section name.
+func ExtractExcerpt(body []byte, excerptSection string) string {
+	return extractExcerpt(body, excerptSection)
+}
+
+// extractExcerpt returns the first excerptMaxRunes runes of the named excerpt
+// section's content (stripped of the heading line itself and blank lines).
+// The section is matched by name only — any heading level (h1–h6) is accepted.
+// The section ends when a heading at the same or higher level is encountered.
+// If the named section is not found, it falls back to the beginning of the body.
+func extractExcerpt(body []byte, excerptSection string) string {
+	if excerptSection == "" {
+		excerptSection = "Summary"
+	}
 	text := string(body)
 	lines := strings.Split(text, "\n")
 
-	inSummary := false
+	inSection := false
+	currentLevel := 0
 	var content strings.Builder
 
 	for _, line := range lines {
 		if heading, level, ok := parseHeading(line); ok {
-			if inSummary {
+			if inSection {
 				// A new heading at the same or higher level ends the section.
-				if level <= 2 {
+				if level <= currentLevel {
 					break
 				}
 			}
-			if level == 2 && strings.EqualFold(strings.TrimSpace(heading), "summary") {
-				inSummary = true
+			if strings.EqualFold(strings.TrimSpace(heading), excerptSection) {
+				inSection = true
+				currentLevel = level
 				continue
 			}
 		}
-		if inSummary {
+		if inSection {
 			content.WriteString(line)
 			content.WriteByte('\n')
 		}
