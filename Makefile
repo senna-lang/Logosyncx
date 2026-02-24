@@ -17,9 +17,9 @@ lint:
 test:
 	go test ./...
 
-## install: install the logos binary to GOPATH/bin
-install:
-	go install .
+## install: build and install the logos binary to ~/bin
+install: build
+	cp logos ~/bin/logos
 
 ## build: build the logos binary
 build:
