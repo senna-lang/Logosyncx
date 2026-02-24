@@ -2,7 +2,7 @@
 id: t-bds34x
 date: 2026-02-21T22:03:24.837052+09:00
 title: Update USAGE.md template — add tasks section for agent reference
-status: in_progress
+status: done
 priority: medium
 session: ""
 tags:
