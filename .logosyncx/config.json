@@ -3,7 +3,27 @@
 	"project": "logosyncx",
 	"agents_file": "CLAUDE.md",
 	"save": {
-		"summary_sections": ["Summary", "Key Decisions"]
+		"summary_sections": ["Summary", "Key Decisions"],
+		"excerpt_section": "Summary",
+		"sections": [
+			{ "name": "Summary", "level": 2, "required": true },
+			{ "name": "Key Decisions", "level": 2, "required": false },
+			{ "name": "Context Used", "level": 2, "required": false },
+			{ "name": "Notes", "level": 2, "required": false },
+			{ "name": "Raw Conversation", "level": 2, "required": false }
+		]
+	},
+	"tasks": {
+		"default_status": "open",
+		"default_priority": "medium",
+		"summary_sections": ["What", "Checklist"],
+		"sections": [
+			{ "name": "What", "level": 2, "required": true },
+			{ "name": "Why", "level": 2, "required": false },
+			{ "name": "Scope", "level": 2, "required": false },
+			{ "name": "Checklist", "level": 2, "required": false },
+			{ "name": "Notes", "level": 2, "required": false }
+		]
 	},
 	"privacy": {
 		"filter_patterns": []
