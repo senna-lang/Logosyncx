@@ -166,8 +166,10 @@ func (s *Store) Save(t *Task, body string) (string, error) {
 		*t = *loaded
 	}
 
-	// Best-effort git add.
-	_ = gitutil.Add(s.projectRoot, path)
+	// Best-effort git add (auto mode only).
+	if s.cfg.Git.AutoPush {
+		_ = gitutil.Add(s.projectRoot, path)
+	}
 
 	// Best-effort index append.
 	_ = AppendTaskIndex(s.projectRoot, t.ToJSON())
@@ -225,10 +227,14 @@ func (s *Store) UpdateFields(nameOrPartial string, fields map[string]string) err
 		if err := os.Remove(oldPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("remove old task file: %w", err)
 		}
-		_ = gitutil.Remove(s.projectRoot, oldPath)
+		if s.cfg.Git.AutoPush {
+			_ = gitutil.Remove(s.projectRoot, oldPath)
+		}
 	}
 
-	_ = gitutil.Add(s.projectRoot, newPath)
+	if s.cfg.Git.AutoPush {
+		_ = gitutil.Add(s.projectRoot, newPath)
+	}
 
 	// Rebuild index to reflect updated field values (best-effort).
 	_, _ = s.RebuildTaskIndex()
@@ -249,7 +255,9 @@ func (s *Store) Delete(nameOrPartial string) error {
 		return fmt.Errorf("remove task file: %w", err)
 	}
 
-	_ = gitutil.Remove(s.projectRoot, path)
+	if s.cfg.Git.AutoPush {
+		_ = gitutil.Remove(s.projectRoot, path)
+	}
 
 	// Rebuild index to remove the deleted entry (best-effort).
 	_, _ = s.RebuildTaskIndex()
@@ -279,7 +287,9 @@ func (s *Store) Purge(status Status) (int, error) {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return count, fmt.Errorf("remove %s: %w", e.Name(), err)
 		}
-		_ = gitutil.Remove(s.projectRoot, path)
+		if s.cfg.Git.AutoPush {
+			_ = gitutil.Remove(s.projectRoot, path)
+		}
 		count++
 	}
 

@@ -19,6 +19,14 @@ type SaveConfig struct {
 	SummarySections []string `json:"summary_sections"`
 }
 
+// GitConfig holds settings related to git automation behaviour.
+type GitConfig struct {
+	// AutoPush, when true, makes logos save automatically run git commit and
+	// git push after staging the session file.  Defaults to false so that
+	// humans (and agents that prefer manual control) can review before pushing.
+	AutoPush bool `json:"auto_push"`
+}
+
 // TasksConfig holds settings related to task management.
 type TasksConfig struct {
 	DefaultStatus   string   `json:"default_status"`
@@ -39,6 +47,7 @@ type Config struct {
 	Save       SaveConfig    `json:"save"`
 	Tasks      TasksConfig   `json:"tasks"`
 	Privacy    PrivacyConfig `json:"privacy"`
+	Git        GitConfig     `json:"git"`
 }
 
 // Default returns a Config populated with sensible default values.

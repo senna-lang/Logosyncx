@@ -18,7 +18,10 @@ var syncCmd = &cobra.Command{
 	Long: `Delete and rebuild index.jsonl and task-index.jsonl by scanning every
 file under .logosyncx/sessions/ and .logosyncx/tasks/ respectively.
 Run this after manually editing, adding, or deleting session or task files
-to bring both indexes back in sync with the filesystem.`,
+to bring both indexes back in sync with the filesystem.
+
+When git.auto_push is false (the default), no git operations are performed.
+When git.auto_push is true, the rebuilt index files are staged with git add.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runSync()
 	},
@@ -34,6 +37,13 @@ func runSync() error {
 		return err
 	}
 
+	// Load config up front so git automation settings are available throughout.
+	cfg, err := config.Load(root)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not load config (%v) — using defaults\n", err)
+		cfg = config.Config{}
+	}
+
 	// --- sessions ------------------------------------------------------------
 	fmt.Println("Rebuilding session index from sessions/...")
 	n, err := index.Rebuild(root)
@@ -42,18 +52,15 @@ func runSync() error {
 	}
 	fmt.Printf("Done. %d sessions indexed.\n", n)
 
-	sessionIndexPath := index.FilePath(root)
-	if gitErr := gitutil.Add(root, sessionIndexPath); gitErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: git add failed for session index (%v) — stage the file manually\n", gitErr)
+	if cfg.Git.AutoPush {
+		sessionIndexPath := index.FilePath(root)
+		if gitErr := gitutil.Add(root, sessionIndexPath); gitErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: git add failed for session index (%v) — stage the file manually\n", gitErr)
+		}
 	}
 
 	// --- tasks ---------------------------------------------------------------
 	fmt.Println("\nRebuilding task index from tasks/...")
-	cfg, err := config.Load(root)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not load config (%v) — using defaults\n", err)
-		cfg = config.Config{}
-	}
 	store := task.NewStore(root, &cfg)
 	m, err := store.RebuildTaskIndex()
 	if err != nil {
@@ -61,9 +68,11 @@ func runSync() error {
 	}
 	fmt.Printf("Done. %d tasks indexed.\n", m)
 
-	taskIndexPath := task.TaskIndexFilePath(root)
-	if gitErr := gitutil.Add(root, taskIndexPath); gitErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: git add failed for task index (%v) — stage the file manually\n", gitErr)
+	if cfg.Git.AutoPush {
+		taskIndexPath := task.TaskIndexFilePath(root)
+		if gitErr := gitutil.Add(root, taskIndexPath); gitErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: git add failed for task index (%v) — stage the file manually\n", gitErr)
+		}
 	}
 
 	return nil

@@ -156,6 +156,62 @@ func TestSave_CreatesFile(t *testing.T) {
 	}
 }
 
+func TestDefault_GitAutoPushIsFalse(t *testing.T) {
+	cfg := Default("auto-push-default")
+	if cfg.Git.AutoPush {
+		t.Error("expected Git.AutoPush to default to false")
+	}
+}
+
+func TestLoad_AppliesDefaults_GitAutoPushIsFalse(t *testing.T) {
+	dir := t.TempDir()
+
+	raw := `{"project": "partial-proj"}`
+
+	cfgDir := filepath.Join(dir, DirName)
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, ConfigFileName), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Git.AutoPush {
+		t.Error("expected Git.AutoPush to be false when not set in config")
+	}
+}
+
+func TestLoad_GitAutoPushTrue(t *testing.T) {
+	dir := t.TempDir()
+
+	raw := `{
+		"project": "push-proj",
+		"git": {
+			"auto_push": true
+		}
+	}`
+
+	cfgDir := filepath.Join(dir, DirName)
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, ConfigFileName), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.Git.AutoPush {
+		t.Error("expected Git.AutoPush to be true when set in config")
+	}
+}
+
 func TestSave_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	original := Config{
@@ -167,6 +223,9 @@ func TestSave_RoundTrip(t *testing.T) {
 		},
 		Privacy: PrivacyConfig{
 			FilterPatterns: []string{`sk-[a-zA-Z0-9]+`, `ghp_[a-zA-Z0-9]+`},
+		},
+		Git: GitConfig{
+			AutoPush: true,
 		},
 	}
 
@@ -197,6 +256,9 @@ func TestSave_RoundTrip(t *testing.T) {
 	if len(loaded.Privacy.FilterPatterns) != len(original.Privacy.FilterPatterns) {
 		t.Errorf("filter_patterns length mismatch: got %d, want %d",
 			len(loaded.Privacy.FilterPatterns), len(original.Privacy.FilterPatterns))
+	}
+	if loaded.Git.AutoPush != original.Git.AutoPush {
+		t.Errorf("git.auto_push mismatch: got %v, want %v", loaded.Git.AutoPush, original.Git.AutoPush)
 	}
 }
 

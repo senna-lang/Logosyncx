@@ -27,7 +27,12 @@ var saveCmd = &cobra.Command{
   logos save --topic "..." [--tag <tag>] [--agent <agent>] \
              [--related <session>] [--body "..."] [--body-stdin]
 
-git add is run automatically; git commit and push remain the user's responsibility.`,
+When git.auto_push is false (the default), no git operations are performed —
+commit and push remain entirely the user's responsibility.
+
+When git.auto_push is true in .logosyncx/config.json, logos save automatically
+runs git add, git commit, and git push after writing the session file so that
+AI agents can share context with the team without manual git interaction.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		topic, _ := cmd.Flags().GetString("topic")
 		tags, _ := cmd.Flags().GetStringArray("tag")
@@ -91,7 +96,7 @@ func runSave(topic string, tags []string, agent string, related []string, body s
 		return err
 	}
 
-	// Load config for privacy filter patterns.
+	// Load config for privacy filter patterns and git automation settings.
 	cfg, err := config.Load(root)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -118,17 +123,41 @@ func runSave(topic string, tags []string, agent string, related []string, body s
 		}
 	}
 
-	// Stage both the session file and the index with git add (best-effort).
-	filesToStage := []string{savedPath, index.FilePath(root)}
-	allStaged := true
-	for _, f := range filesToStage {
-		if err := gitutil.Add(root, f); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: git add failed for %s (%v) — stage the file manually\n", f, err)
-			allStaged = false
+	// In auto mode: stage, commit, and push so agents can share context
+	// without any manual git interaction.
+	// In manual mode: leave all git operations to the user.
+	if cfg.Git.AutoPush {
+		filesToStage := []string{savedPath, index.FilePath(root)}
+		allStaged := true
+		for _, f := range filesToStage {
+			if err := gitutil.Add(root, f); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: git add failed for %s (%v) — stage the file manually\n", f, err)
+				allStaged = false
+			}
 		}
-	}
-	if allStaged {
-		fmt.Println("✓ Staged with git add")
+		if allStaged {
+			fmt.Println("✓ Staged with git add")
+		}
+
+		commitMsg := fmt.Sprintf("logos: save session %q", topic)
+		if err := gitutil.Commit(root, commitMsg); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: git commit failed (%v) — commit and push manually\n", err)
+			fmt.Println()
+			fmt.Println("Next: commit and push to share context with your team.")
+			return nil
+		}
+		fmt.Println("✓ Committed with git commit")
+
+		if err := gitutil.Push(root); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: git push failed (%v) — push manually\n", err)
+			fmt.Println()
+			fmt.Println("Next: push to share context with your team.")
+			return nil
+		}
+		fmt.Println("✓ Pushed with git push")
+		fmt.Println()
+		fmt.Println("Context shared with your team.")
+		return nil
 	}
 
 	fmt.Println()
