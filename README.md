@@ -84,25 +84,19 @@ cd your-project
 logos init
 
 # 2. Save a session
-logos save --topic "auth refactor" --tag auth --tag jwt --body-stdin <<'EOF'
-## Summary
-
-Decided to migrate from session cookies to JWT. The new flow uses RS256 signing.
-
-## Key Decisions
-
-- RS256 over HS256 for multi-service support
-- Refresh tokens stored in httpOnly cookies
-EOF
+logos save --topic "auth refactor" \
+           --tag auth --tag jwt \
+           --section "Summary=Decided to migrate from session cookies to JWT. The new flow uses RS256 signing." \
+           --section "Key Decisions=- RS256 over HS256 for multi-service support\n- Refresh tokens stored in httpOnly cookies"
 
 # 3. List all saved sessions
 logos ls
 
 # 4. Read a session
-logos refer auth-refactor --summary
+logos refer --name auth-refactor --summary
 
 # 5. Search by keyword
-logos search "JWT"
+logos search --keyword "JWT"
 ```
 
 ---
@@ -117,7 +111,7 @@ Initializes Logosyncx in the current directory.
 logos init
 ```
 
-- Creates `.logosyncx/` with `config.json`, `USAGE.md`, `template.md`, and `task-template.md`
+- Creates `.logosyncx/` with `config.json` and `USAGE.md`
 - Creates `.logosyncx/sessions/` and `.logosyncx/tasks/{open,in_progress,done,cancelled}/`
 - Appends a reference line to `AGENTS.md` (or `CLAUDE.md` if present)
 - Exits with an error if already initialized
@@ -129,18 +123,16 @@ logos init
 Saves a session to `.logosyncx/sessions/` using flag-based input.
 
 ```sh
-# Topic only (empty body)
+# Topic only (no body)
 logos save --topic "quick sync"
 
-# Inline body
-logos save --topic "auth refactor" --body "## Summary\n\nSwitched to JWT."
-
-# Body from stdin (recommended for multi-line content)
+# With sections
 logos save --topic "auth refactor" \
            --tag auth --tag jwt \
            --agent claude-code \
            --related 2025-02-18_db-schema.md \
-           --body-stdin < notes.md
+           --section "Summary=Switched to JWT." \
+           --section "Key Decisions=- RS256 chosen for multi-service support"
 ```
 
 | Flag | Short | Description |
@@ -149,12 +141,12 @@ logos save --topic "auth refactor" \
 | `--tag` | | Tag to attach — repeatable (`--tag go --tag cli`) |
 | `--agent` | `-a` | Agent name (e.g. `claude-code`) |
 | `--related` | | Related session filename — repeatable |
-| `--body` | `-b` | Session body text (inline) |
-| `--body-stdin` | | Read body prose from stdin (no frontmatter needed) |
+| `--section` | | Section content as `"Name=content"` — repeatable; name must be defined in `config.json` |
 
 - `id` and `date` are auto-filled automatically
 - Saved as `<date>_<topic>.md` under `.logosyncx/sessions/`
-- `git add` is run automatically; `git commit` and `git push` remain your responsibility
+- By default (`git.auto_push: false`) no git operations are performed — commit and push are your responsibility
+- When `git.auto_push: true` in `config.json`, `git add`, `git commit`, and `git push` run automatically
 
 ---
 
@@ -194,12 +186,12 @@ Agents read this list and decide which sessions to load — no separate search i
 Prints a session's content.
 
 ```sh
-logos refer 2025-02-20_auth-refactor.md   # full content
-logos refer auth                           # partial name match
-logos refer auth --summary                 # key sections only (saves tokens)
+logos refer --name 2025-02-20_auth-refactor.md   # full content
+logos refer --name auth                           # partial name match
+logos refer --name auth --summary                 # key sections only (saves tokens)
 ```
 
-`--summary` returns only the sections listed in `summary_sections` in `config.json`
+`--summary` returns only the sections listed in `sessions.summary_sections` in `config.json`
 (default: `Summary` and `Key Decisions`). Recommended for agents to keep token usage low.
 
 ---
@@ -209,8 +201,8 @@ logos refer auth --summary                 # key sections only (saves tokens)
 Keyword search across topic, tags, and excerpt.
 
 ```sh
-logos search "JWT"
-logos search "auth" --tag security
+logos search --keyword "JWT"
+logos search --keyword "auth" --tag security
 ```
 
 Case-insensitive string match — useful for quickly narrowing candidates by keyword.
@@ -228,6 +220,19 @@ logos sync
 
 ---
 
+### `logos update`
+
+Updates the `logos` binary to the latest release from GitHub.
+
+```sh
+logos update           # download and install the latest release
+logos update --check   # check only; print status without installing
+```
+
+Not available for development (`dev`) builds.
+
+---
+
 ### `logos task`
 
 Manages tasks stored in `.logosyncx/tasks/`.
@@ -235,10 +240,11 @@ Manages tasks stored in `.logosyncx/tasks/`.
 ```sh
 # Create a task
 logos task create --title "Implement rate limiting" \
-                  --description "Add per-IP rate limiting to the auth endpoint." \
                   --priority high \
                   --tag go --tag auth \
-                  --session auth-refactor
+                  --session auth-refactor \
+                  --section "What=Add per-IP rate limiting to the auth endpoint." \
+                  --section "Checklist=- [ ] Implement middleware\n- [ ] Add tests"
 
 # List tasks
 logos task ls                              # human-readable table
@@ -248,24 +254,24 @@ logos task ls --tag auth                  # filter by tag
 logos task ls --json                      # structured JSON output
 
 # Read a task
-logos task refer rate-limiting            # full content
-logos task refer rate-limiting --summary  # key sections only
-logos task refer rate-limiting --with-session  # append linked session summary
+logos task refer --name rate-limiting                       # full content
+logos task refer --name rate-limiting --summary             # key sections only
+logos task refer --name rate-limiting --with-session        # append linked session summary
 
 # Update a task
-logos task update rate-limiting --status in_progress
-logos task update rate-limiting --status done
-logos task update rate-limiting --priority medium
-logos task update rate-limiting --assignee alice
+logos task update --name rate-limiting --status in_progress
+logos task update --name rate-limiting --status done
+logos task update --name rate-limiting --priority medium
+logos task update --name rate-limiting --assignee alice
 
 # Search tasks
-logos task search "rate limit"
-logos task search "auth" --status open
+logos task search --keyword "rate limit"
+logos task search --keyword "auth" --status open
 
 # Delete tasks
-logos task delete rate-limiting           # prompts for confirmation
-logos task delete rate-limiting --force   # skip confirmation
-logos task purge --status done            # bulk-delete by status
+logos task delete --name rate-limiting           # prompts for confirmation
+logos task delete --name rate-limiting --force   # skip confirmation
+logos task purge --status done                   # bulk-delete by status
 logos task purge --status done --force
 ```
 
@@ -274,10 +280,10 @@ logos task purge --status done --force
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--title` | `-T` | Task title — required |
-| `--description` | `-d` | Task description (becomes the `## What` section) |
 | `--priority` | `-p` | `high` / `medium` / `low` (default: `medium`) |
 | `--tag` | | Tag to attach — repeatable |
 | `--session` | `-s` | Partial name of the session to link |
+| `--section` | | Section content as `"Name=content"` — repeatable; name must be defined in `config.json` |
 
 Tasks are stored as markdown files in `.logosyncx/tasks/<status>/` and tracked in git alongside sessions.
 
@@ -292,11 +298,35 @@ Tasks are stored as markdown files in `.logosyncx/tasks/<status>/` and tracked i
   "version": "1",
   "project": "my-project",
   "agents_file": "AGENTS.md",
-  "save": {
-    "summary_sections": ["Summary", "Key Decisions"]
+  "sessions": {
+    "summary_sections": ["Summary", "Key Decisions"],
+    "excerpt_section": "Summary",
+    "sections": [
+      { "name": "Summary",         "level": 2, "required": true  },
+      { "name": "Key Decisions",   "level": 2, "required": false },
+      { "name": "Context Used",    "level": 2, "required": false },
+      { "name": "Notes",           "level": 2, "required": false },
+      { "name": "Raw Conversation","level": 2, "required": false }
+    ]
+  },
+  "tasks": {
+    "default_status": "open",
+    "default_priority": "medium",
+    "summary_sections": ["What", "Checklist"],
+    "excerpt_section": "What",
+    "sections": [
+      { "name": "What",      "level": 2, "required": true  },
+      { "name": "Why",       "level": 2, "required": false },
+      { "name": "Scope",     "level": 2, "required": false },
+      { "name": "Checklist", "level": 2, "required": false },
+      { "name": "Notes",     "level": 2, "required": false }
+    ]
   },
   "privacy": {
     "filter_patterns": []
+  },
+  "git": {
+    "auto_push": false
   }
 }
 ```
@@ -304,8 +334,14 @@ Tasks are stored as markdown files in `.logosyncx/tasks/<status>/` and tracked i
 | Field | Description |
 |-------|-------------|
 | `agents_file` | The file `logos init` appends its reference line to |
-| `save.summary_sections` | Sections returned by `logos refer --summary` |
+| `sessions.summary_sections` | Sections returned by `logos refer --summary` |
+| `sessions.excerpt_section` | Section used as the session excerpt in the index (default: `Summary`) |
+| `sessions.sections` | Ordered list of body sections for session files |
+| `tasks.summary_sections` | Sections returned by `logos task refer --summary` |
+| `tasks.excerpt_section` | Section used as the task excerpt in the index (default: `What`) |
+| `tasks.sections` | Ordered list of body sections for task files |
 | `privacy.filter_patterns` | Regex patterns — matching content triggers a warning on `logos save` |
+| `git.auto_push` | When `true`, `logos save` runs `git add`, `git commit`, and `git push` automatically |
 
 ---
 
@@ -317,8 +353,6 @@ your-project/
 ├── .logosyncx/
 │   ├── config.json
 │   ├── USAGE.md                     ← agent-facing command reference
-│   ├── template.md
-│   ├── task-template.md
 │   ├── index.jsonl                  ← session index (auto-managed)
 │   ├── task-index.jsonl             ← task index (auto-managed)
 │   ├── sessions/
@@ -346,7 +380,7 @@ Agent:
   1. Reads AGENTS.md → "Use logos CLI, see .logosyncx/USAGE.md"
   2. Runs: logos ls --json
   3. Reads excerpts, judges "2025-02-20_auth-refactor.md looks relevant"
-  4. Runs: logos refer auth-refactor --summary
+  4. Runs: logos refer --name auth-refactor --summary
   5. Answers with awareness of past decisions
 
 --- later ---
@@ -358,10 +392,8 @@ Agent:
                       --tag auth --tag go \
                       --agent claude-code \
                       --related 2025-02-20_auth-refactor.md \
-                      --body-stdin <<'EOF'
-     ## Summary
-     Implemented JWT middleware for the auth service...
-     EOF
+                      --section "Summary=Implemented JWT middleware for the auth service..." \
+                      --section "Key Decisions=- Used RS256 signing\n- Middleware applied at router level"
 ```
 
 Semantic understanding is the agent's responsibility.
@@ -380,6 +412,7 @@ Logosyncx focuses on storing and retrieving data — the LLM decides what is rel
 | `logos refer` | ✅ Available |
 | `logos search` | ✅ Available |
 | `logos sync` | ✅ Available |
+| `logos update` | ✅ Available |
 | `logos task` | ✅ Available |
 | `logos status` | 📅 Planned |
 
@@ -392,8 +425,8 @@ Logosyncx focuses on storing and retrieving data — the LLM decides what is rel
 After cloning the repository, run `make setup` once to activate the git pre-commit hook:
 
 ```sh
-git clone https://github.com/senna-lang/logosyncx.git
-cd logosyncx
+git clone https://github.com/senna-lang/Logosyncx.git
+cd Logosyncx
 make setup
 ```
 
@@ -407,8 +440,12 @@ This configures `git config core.hooksPath scripts/hooks`, which activates a pre
 | `make fmt` | Format all Go source files (`go fmt ./...`) |
 | `make lint` | Run static analysis (`go vet ./...`) |
 | `make test` | Run all tests (`go test ./...`) |
-| `make build` | Build the `logos` binary |
-| `make clean` | Remove the built binary |
+| `make build` | Build the `logos` binary (version shows as `dev`) |
+| `make install` | Build and install to `~/bin/logos` |
+| `make clean` | Remove the built binary and `dist/` |
+| `make snapshot` | Build a local snapshot for all platforms via GoReleaser (no publish) |
+| `make release-dry-run` | Full release dry run — builds all platforms but does not publish |
+| `make release` | Tag HEAD and push to trigger the GitHub Actions release pipeline |
 
 ### Before committing
 
