@@ -13,7 +13,7 @@ import (
 )
 
 var searchCmd = &cobra.Command{
-	Use:   "search <keyword>",
+	Use:   "search",
 	Short: "Keyword search across session topic, tags, and excerpt",
 	Long: `Case-insensitive keyword search across the topic, tags, and excerpt of every
 saved session. Results are printed as a human-readable table sorted by date
@@ -23,14 +23,17 @@ Combine with --tag to pre-filter by tag before applying the keyword match.
 
 For deeper semantic search, use 'logos ls --json' and let the agent reason
 over the full excerpt list — no embedding API required.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		keyword, _ := cmd.Flags().GetString("keyword")
 		tag, _ := cmd.Flags().GetString("tag")
-		return runSearch(args[0], tag)
+		return runSearch(keyword, tag)
 	},
 }
 
 func init() {
+	searchCmd.Flags().StringP("keyword", "k", "", "Keyword to search for (case-insensitive, matches topic, tags, and excerpt)")
+	_ = searchCmd.MarkFlagRequired("keyword")
 	searchCmd.Flags().StringP("tag", "t", "", "Pre-filter sessions by tag before applying the keyword match")
 	rootCmd.AddCommand(searchCmd)
 }

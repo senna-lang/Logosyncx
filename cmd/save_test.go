@@ -32,7 +32,7 @@ func setupInitedProject(t *testing.T) string {
 // --- flag validation ---------------------------------------------------------
 
 func TestSave_ErrorWhenNoTopicProvided(t *testing.T) {
-	err := runSave("", nil, "", nil, "", false)
+	err := runSave("", nil, "", nil, nil)
 	if err == nil {
 		t.Fatal("expected error when no topic provided, got nil")
 	}
@@ -41,24 +41,12 @@ func TestSave_ErrorWhenNoTopicProvided(t *testing.T) {
 	}
 }
 
-func TestSave_ErrorWhenBodyAndBodyStdinBothSet(t *testing.T) {
-	setupInitedProject(t)
-
-	err := runSave("body-conflict", nil, "", nil, "inline body", true)
-	if err == nil {
-		t.Fatal("expected error when --body and --body-stdin both set, got nil")
-	}
-	if !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Errorf("expected 'mutually exclusive' in error, got: %v", err)
-	}
-}
-
 // --- flag-based save ---------------------------------------------------------
 
 func TestSave_TopicOnly(t *testing.T) {
 	dir := setupInitedProject(t)
 
-	if err := runSave("topic-only", nil, "", nil, "", false); err != nil {
+	if err := runSave("topic-only", nil, "", nil, nil); err != nil {
 		t.Fatalf("runSave with --topic failed: %v", err)
 	}
 
@@ -74,11 +62,11 @@ func TestSave_TopicOnly(t *testing.T) {
 	}
 }
 
-func TestSave_AllFields(t *testing.T) {
+func TestSave_AllFrontmatterFields(t *testing.T) {
 	dir := setupInitedProject(t)
 
-	body := "## Summary\n\nThis is a full flag-based session.\n"
-	if err := runSave("all-fields", []string{"go", "cli"}, "claude-code", []string{"2026-01-01_previous.md"}, body, false); err != nil {
+	sections := []string{"Summary=This is a full flag-based session."}
+	if err := runSave("all-fields", []string{"go", "cli"}, "claude-code", []string{"2026-01-01_previous.md"}, sections); err != nil {
 		t.Fatalf("runSave with all flags failed: %v", err)
 	}
 
@@ -111,7 +99,7 @@ func TestSave_AutoFillsIDAndDate(t *testing.T) {
 	dir := setupInitedProject(t)
 
 	before := time.Now().Add(-time.Second)
-	if err := runSave("autofill-flags", nil, "", nil, "", false); err != nil {
+	if err := runSave("autofill-flags", nil, "", nil, nil); err != nil {
 		t.Fatalf("runSave failed: %v", err)
 	}
 	after := time.Now().Add(time.Second)
@@ -135,7 +123,7 @@ func TestSave_AutoFillsIDAndDate(t *testing.T) {
 func TestSave_FileNameFormat(t *testing.T) {
 	dir := setupInitedProject(t)
 
-	if err := runSave("filename-format", nil, "", nil, "", false); err != nil {
+	if err := runSave("filename-format", nil, "", nil, nil); err != nil {
 		t.Fatalf("runSave failed: %v", err)
 	}
 
@@ -157,22 +145,28 @@ func TestSave_FileNameFormat(t *testing.T) {
 	}
 }
 
-func TestSave_BodyStdin(t *testing.T) {
+func TestSave_ErrorWhenNotInitialized(t *testing.T) {
+	dir := t.TempDir()
+	orig, _ := os.Getwd()
+	_ = os.Chdir(dir)
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+
+	err := runSave("no-init", nil, "", nil, nil)
+	if err == nil {
+		t.Fatal("expected error when project not initialized, got nil")
+	}
+	if !strings.Contains(err.Error(), "logos init") {
+		t.Errorf("expected 'logos init' hint in error, got: %v", err)
+	}
+}
+
+// --- --section flag: valid usage ---------------------------------------------
+
+func TestSave_SectionFlag_ValidSection(t *testing.T) {
 	dir := setupInitedProject(t)
 
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	_, _ = w.WriteString("## Summary\n\nBody from stdin.\n")
-	w.Close()
-
-	origStdin := os.Stdin
-	os.Stdin = r
-	t.Cleanup(func() { os.Stdin = origStdin })
-
-	if err := runSave("body-stdin-test", nil, "", nil, "", true); err != nil {
-		t.Fatalf("runSave with --body-stdin failed: %v", err)
+	if err := runSave("section-valid", nil, "", nil, []string{"Summary=This is a summary."}); err != nil {
+		t.Fatalf("runSave with valid --section failed: %v", err)
 	}
 
 	sessions, err := session.LoadAll(dir)
@@ -182,23 +176,184 @@ func TestSave_BodyStdin(t *testing.T) {
 	if len(sessions) != 1 {
 		t.Fatalf("expected 1 session, got %d", len(sessions))
 	}
-	if !strings.Contains(sessions[0].Body, "Body from stdin") {
-		t.Errorf("body does not contain expected text, got: %q", sessions[0].Body)
+	body := sessions[0].Body
+	if !strings.Contains(body, "## Summary") {
+		t.Errorf("expected '## Summary' heading in body, got: %q", body)
+	}
+	if !strings.Contains(body, "This is a summary.") {
+		t.Errorf("expected section content in body, got: %q", body)
 	}
 }
 
-func TestSave_ErrorWhenNotInitialized(t *testing.T) {
-	dir := t.TempDir()
-	orig, _ := os.Getwd()
-	_ = os.Chdir(dir)
-	t.Cleanup(func() { _ = os.Chdir(orig) })
+func TestSave_SectionFlag_MultipleSections(t *testing.T) {
+	dir := setupInitedProject(t)
 
-	err := runSave("no-init", nil, "", nil, "", false)
-	if err == nil {
-		t.Fatal("expected error when project not initialized, got nil")
+	sections := []string{"Summary=My summary.", "Key Decisions=- Decision A"}
+	if err := runSave("multi-section", nil, "", nil, sections); err != nil {
+		t.Fatalf("runSave with multiple --section failed: %v", err)
 	}
-	if !strings.Contains(err.Error(), "logos init") {
-		t.Errorf("expected 'logos init' hint in error, got: %v", err)
+
+	sessions, err := session.LoadAll(dir)
+	if err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	body := sessions[0].Body
+	if !strings.Contains(body, "## Summary") {
+		t.Errorf("expected '## Summary' in body, got: %q", body)
+	}
+	if !strings.Contains(body, "## Key Decisions") {
+		t.Errorf("expected '## Key Decisions' in body, got: %q", body)
+	}
+}
+
+func TestSave_SectionFlag_ContentPreserved(t *testing.T) {
+	dir := setupInitedProject(t)
+
+	content := "Decided to use Go for the CLI tool."
+	if err := runSave("content-preserved", nil, "", nil, []string{"Summary=" + content}); err != nil {
+		t.Fatalf("runSave failed: %v", err)
+	}
+
+	sessions, err := session.LoadAll(dir)
+	if err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if !strings.Contains(sessions[0].Body, content) {
+		t.Errorf("expected content %q in body, got: %q", content, sessions[0].Body)
+	}
+}
+
+func TestSave_SectionFlag_EmptySectionsProducesEmptyBody(t *testing.T) {
+	dir := setupInitedProject(t)
+
+	if err := runSave("empty-body", nil, "", nil, nil); err != nil {
+		t.Fatalf("runSave with no sections failed: %v", err)
+	}
+
+	sessions, err := session.LoadAll(dir)
+	if err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if strings.TrimSpace(sessions[0].Body) != "" {
+		t.Errorf("expected empty body when no --section provided, got: %q", sessions[0].Body)
+	}
+}
+
+// --- --section flag: error cases ---------------------------------------------
+
+func TestSave_SectionFlag_UnknownSection_ReturnsError(t *testing.T) {
+	setupInitedProject(t)
+
+	err := runSave("unknown-section", nil, "", nil, []string{"UnknownSection=text"})
+	if err == nil {
+		t.Fatal("expected error for unknown --section name, got nil")
+	}
+	if !strings.Contains(err.Error(), "UnknownSection") {
+		t.Errorf("expected unknown section name in error, got: %v", err)
+	}
+}
+
+func TestSave_SectionFlag_UnknownSection_ListsAllowed(t *testing.T) {
+	setupInitedProject(t)
+
+	err := runSave("unknown-section", nil, "", nil, []string{"BadSection=text"})
+	if err == nil {
+		t.Fatal("expected error for unknown --section name, got nil")
+	}
+	// Error message should list allowed section names.
+	if !strings.Contains(err.Error(), "Summary") {
+		t.Errorf("expected allowed section names in error, got: %v", err)
+	}
+}
+
+func TestSave_SectionFlag_InvalidFormat_ReturnsError(t *testing.T) {
+	setupInitedProject(t)
+
+	err := runSave("bad-format", nil, "", nil, []string{"NoEqualsSign"})
+	if err == nil {
+		t.Fatal("expected error for bad --section format, got nil")
+	}
+	if !strings.Contains(err.Error(), "Name=content") {
+		t.Errorf("expected format hint in error, got: %v", err)
+	}
+}
+
+func TestSave_SectionFlag_EmptyName_ReturnsError(t *testing.T) {
+	setupInitedProject(t)
+
+	err := runSave("empty-name", nil, "", nil, []string{"=some content"})
+	if err == nil {
+		t.Fatal("expected error for empty section name, got nil")
+	}
+}
+
+func TestSave_SectionFlag_DuplicateSection_ReturnsError(t *testing.T) {
+	setupInitedProject(t)
+
+	err := runSave("dup-section", nil, "", nil, []string{"Summary=first", "Summary=second"})
+	if err == nil {
+		t.Fatal("expected error for duplicate --section name, got nil")
+	}
+	if !strings.Contains(err.Error(), "more than once") {
+		t.Errorf("expected 'more than once' in error, got: %v", err)
+	}
+}
+
+// --- --section flag: output ordering -----------------------------------------
+
+func TestSave_SectionFlag_OutputOrderFollowsConfig(t *testing.T) {
+	dir := setupInitedProject(t)
+
+	// Provide sections in reverse config order; output must follow config order.
+	sections := []string{"Key Decisions=- Decision A", "Summary=My summary."}
+	if err := runSave("section-order", nil, "", nil, sections); err != nil {
+		t.Fatalf("runSave failed: %v", err)
+	}
+
+	sessions, err := session.LoadAll(dir)
+	if err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	body := sessions[0].Body
+	summaryIdx := strings.Index(body, "## Summary")
+	decisionsIdx := strings.Index(body, "## Key Decisions")
+	if summaryIdx == -1 || decisionsIdx == -1 {
+		t.Fatalf("expected both sections in body, got: %q", body)
+	}
+	if summaryIdx > decisionsIdx {
+		t.Errorf("expected Summary before Key Decisions (config order), got body: %q", body)
+	}
+}
+
+func TestSave_SectionFlag_HeadingLevelFromConfig(t *testing.T) {
+	dir := setupInitedProject(t)
+
+	// Default config sets sections at level 2 (##).
+	if err := runSave("heading-level", nil, "", nil, []string{"Summary=text"}); err != nil {
+		t.Fatalf("runSave failed: %v", err)
+	}
+
+	sessions, err := session.LoadAll(dir)
+	if err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if !strings.Contains(sessions[0].Body, "## Summary") {
+		t.Errorf("expected level-2 heading '## Summary', got: %q", sessions[0].Body)
 	}
 }
 
@@ -273,8 +428,8 @@ func TestSave_UsesConfigPrivacyPatterns(t *testing.T) {
 	cfg.Privacy.FilterPatterns = []string{`sk-[a-zA-Z0-9]+`}
 	_ = config.Save(dir, cfg)
 
-	body := "## Summary\n\nUsed sk-abc123 for auth.\n"
-	if err := runSave("privacy-test", nil, "", nil, body, false); err != nil {
+	sections := []string{"Summary=Used sk-abc123 for auth."}
+	if err := runSave("privacy-test", nil, "", nil, sections); err != nil {
 		t.Fatalf("runSave should succeed even with privacy match, got: %v", err)
 	}
 }

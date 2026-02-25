@@ -13,7 +13,7 @@ import (
 )
 
 var referCmd = &cobra.Command{
-	Use:   "refer <name>",
+	Use:   "refer",
 	Short: "Print the content of a saved session",
 	Long: `Find a session by name (exact or partial match against filename and topic)
 and print its full content to stdout.
@@ -23,14 +23,17 @@ saving tokens when the command is used by agents.
 
 If multiple sessions match the given name, a candidate list is printed and
 the command exits with an error so the caller knows to narrow the search.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		name, _ := cmd.Flags().GetString("name")
 		summaryOnly, _ := cmd.Flags().GetBool("summary")
-		return runRefer(args[0], summaryOnly)
+		return runRefer(name, summaryOnly)
 	},
 }
 
 func init() {
+	referCmd.Flags().StringP("name", "n", "", "Session name to look up (exact or partial match against filename, topic, or ID)")
+	_ = referCmd.MarkFlagRequired("name")
 	referCmd.Flags().Bool("summary", false, "Return only summary_sections from config (saves tokens)")
 	rootCmd.AddCommand(referCmd)
 }

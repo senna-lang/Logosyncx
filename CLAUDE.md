@@ -13,11 +13,11 @@ The full design spec is in `ClaudeLogoSyncDesign.md`.
 This project uses **logos tasks** for issue tracking, stored in `.logosyncx/tasks/`.
 
 ```bash
-logos task ls --status open --json          # Find available work
-logos task refer <name>                     # View task details
-logos task update <name> --status in_progress  # Claim a task
-logos task update <name> --status done      # Complete a task (deletes the file)
-logos sync                                  # Rebuild session and task indexes
+logos task ls --status open --json                        # Find available work
+logos task refer --name <name>                            # View task details
+logos task update --name <name> --status in_progress      # Claim a task
+logos task update --name <name> --status done             # Complete a task (deletes the file)
+logos sync                                                # Rebuild session and task indexes
 ```
 
 **Session completion is mandatory** — see `AGENTS.md` for the full workflow including required `git push`.
@@ -52,9 +52,9 @@ Sessions are plain markdown files with YAML frontmatter (`id`, `date`, `topic`, 
 
 - `logos init` — create `.logosyncx/`, append to `AGENTS.md`, generate `USAGE.md`
 - `logos ls [--tag] [--since] [--json]` — list sessions; `--json` returns structured output with excerpts for agent consumption
-- `logos refer <name> [--summary]` — print session content; `--summary` returns only `summary_sections` from config to save tokens
-- `logos search <keyword>` — keyword filter on topic, tags, and excerpt (human-use complement to agent's own semantic reasoning)
-- `logos save --file <path> | --stdin` — validate, auto-fill `id`/`date`, save to `sessions/`, run `git add`
+- `logos refer --name <name> [--summary]` — print session content; `--summary` returns only `summary_sections` from config to save tokens
+- `logos search --keyword <keyword>` — keyword filter on topic, tags, and excerpt (human-use complement to agent's own semantic reasoning)
+- `logos save --topic <topic> [--section "Name=content"]` — validate, auto-fill `id`/`date`, save to `sessions/`, run `git add`; body content is provided exclusively via `--section` flags using names defined in `config.json`
 - `logos sync` — rebuild index from session files
 - `logos status` — show unsaved/uncommitted sessions
 - `logos setup claude|cursor|aider` — integrate with agent config files (Phase 2)

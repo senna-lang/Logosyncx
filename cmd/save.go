@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -22,11 +21,19 @@ import (
 
 var saveCmd = &cobra.Command{
 	Use:   "save",
+	Args:  cobra.NoArgs,
 	Short: "Save a session file to .logosyncx/sessions/",
 	Long: `Save a session to .logosyncx/sessions/ using flag-based input.
 
   logos save --topic "..." [--tag <tag>] [--agent <agent>] \
-             [--related <session>] [--body "..."] [--body-stdin]
+             [--related <session>] \
+             [--section "Name=content"] [--section "Name2=content2"] ...
+
+Body content is provided exclusively via --section flags. Each --section value
+must be formatted as "Name=content" where Name matches one of the section names
+defined in .logosyncx/config.json (sessions.sections). Unknown section names are
+rejected. --section may be repeated once per section; providing the same section
+name more than once is an error.
 
 When git.auto_push is false (the default), no git operations are performed —
 commit and push remain entirely the user's responsibility.
@@ -39,9 +46,8 @@ AI agents can share context with the team without manual git interaction.`,
 		tags, _ := cmd.Flags().GetStringArray("tag")
 		agent, _ := cmd.Flags().GetString("agent")
 		related, _ := cmd.Flags().GetStringArray("related")
-		body, _ := cmd.Flags().GetString("body")
-		bodyStdin, _ := cmd.Flags().GetBool("body-stdin")
-		return runSave(topic, tags, agent, related, body, bodyStdin)
+		sections, _ := cmd.Flags().GetStringArray("section")
+		return runSave(topic, tags, agent, related, sections)
 	},
 }
 
@@ -50,28 +56,13 @@ func init() {
 	saveCmd.Flags().StringArray("tag", []string{}, "Tag to attach (repeatable: --tag go --tag cli)")
 	saveCmd.Flags().StringP("agent", "a", "", "Agent name (e.g. claude-code)")
 	saveCmd.Flags().StringArray("related", []string{}, "Related session filename (repeatable)")
-	saveCmd.Flags().StringP("body", "b", "", "Session body text (inline)")
-	saveCmd.Flags().Bool("body-stdin", false, "Read session body prose from stdin (no frontmatter needed)")
+	saveCmd.Flags().StringArray("section", []string{}, "Section content as 'Name=content' (repeatable; name must be defined in config)")
 	rootCmd.AddCommand(saveCmd)
 }
 
-func runSave(topic string, tags []string, agent string, related []string, body string, bodyStdin bool) error {
+func runSave(topic string, tags []string, agent string, related []string, sections []string) error {
 	if strings.TrimSpace(topic) == "" {
 		return errors.New("provide --topic <topic>")
-	}
-	if body != "" && bodyStdin {
-		return errors.New("--body and --body-stdin are mutually exclusive")
-	}
-
-	var bodyText string
-	if bodyStdin {
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return fmt.Errorf("read stdin: %w", err)
-		}
-		bodyText = string(data)
-	} else {
-		bodyText = body
 	}
 
 	s := session.Session{
@@ -79,7 +70,6 @@ func runSave(topic string, tags []string, agent string, related []string, body s
 		Tags:    tags,
 		Agent:   agent,
 		Related: related,
-		Body:    bodyText,
 	}
 
 	var err error
@@ -98,11 +88,20 @@ func runSave(topic string, tags []string, agent string, related []string, body s
 		return err
 	}
 
-	// Load config for privacy filter patterns and git automation settings.
+	// Load config for section definitions, privacy filters, and git settings.
 	cfg, err := config.Load(root)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+
+	// Build the body from --section flags.
+	// Each flag value must be "Name=content" where Name is defined in config.
+	// An empty sections list produces an empty body.
+	bodyText, err := buildBodyFromSections(sections, cfg.Sessions.Sections)
+	if err != nil {
+		return err
+	}
+	s.Body = bodyText
 
 	// Check privacy filter patterns and warn on matches.
 	warnPrivacy(s.Body, cfg.Privacy.FilterPatterns)
@@ -207,12 +206,10 @@ func warnMissingSections(body string, sections []config.SectionConfig) {
 // text matches name (case-insensitive) at any heading level (h1–h6).
 func hasHeading(body, name string) bool {
 	for _, line := range strings.Split(body, "\n") {
-		// Count leading '#' characters.
 		i := 0
 		for i < len(line) && line[i] == '#' {
 			i++
 		}
-		// Must have 1–6 hashes followed by a space.
 		if i == 0 || i > 6 || i >= len(line) || line[i] != ' ' {
 			continue
 		}

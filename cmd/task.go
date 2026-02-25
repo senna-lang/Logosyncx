@@ -43,32 +43,40 @@ func init() {
 
 var taskCreateCmd = &cobra.Command{
 	Use:   "create",
+	Args:  cobra.NoArgs,
 	Short: "Create a new task file",
 	Long: `Create a task in .logosyncx/tasks/ using flag-based input.
 
-  logos task create --title "..." [--description "..."] [--priority high|medium|low] \
-                    [--tag <tag>] [--session <partial>]
+  logos task create --title "..." [--priority high|medium|low] \
+                    [--tag <tag>] [--session <partial>] \
+                    [--section "Name=content"] [--section "Name2=content2"] ...
+
+Body content is provided exclusively via --section flags. Each --section value
+must be formatted as "Name=content" where Name matches one of the section names
+defined in .logosyncx/config.json (tasks.sections). Unknown section names are
+rejected. --section may be repeated once per section; providing the same section
+name more than once is an error.
 
 auto-fills id/date. Optionally link to an existing session with --session.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sessionPartial, _ := cmd.Flags().GetString("session")
 		title, _ := cmd.Flags().GetString("title")
-		description, _ := cmd.Flags().GetString("description")
 		priority, _ := cmd.Flags().GetString("priority")
 		tags, _ := cmd.Flags().GetStringArray("tag")
-		return runTaskCreate(sessionPartial, title, description, priority, tags)
+		sections, _ := cmd.Flags().GetStringArray("section")
+		return runTaskCreate(sessionPartial, title, priority, tags, sections)
 	},
 }
 
 func init() {
 	taskCreateCmd.Flags().StringP("session", "s", "", "Partial name of the session to link (resolved by partial match)")
 	taskCreateCmd.Flags().StringP("title", "T", "", "Task title (required)")
-	taskCreateCmd.Flags().StringP("description", "d", "", "Task description (sets the ## What section body)")
 	taskCreateCmd.Flags().StringP("priority", "p", "medium", "Task priority (high|medium|low)")
 	taskCreateCmd.Flags().StringArray("tag", []string{}, "Tag to attach (repeatable: --tag go --tag cli)")
+	taskCreateCmd.Flags().StringArray("section", []string{}, "Section content as 'Name=content' (repeatable; name must be defined in config)")
 }
 
-func runTaskCreate(sessionPartial, title, description, priority string, tags []string) error {
+func runTaskCreate(sessionPartial, title, priority string, tags []string, sections []string) error {
 	if strings.TrimSpace(title) == "" {
 		return errors.New("provide --title <title>")
 	}
@@ -79,12 +87,20 @@ func runTaskCreate(sessionPartial, title, description, priority string, tags []s
 		return fmt.Errorf("invalid priority %q: must be one of high, medium, low", priority)
 	}
 
-	// Build body markdown from description.
-	var body string
-	if description != "" {
-		body = "## What\n\n" + description + "\n"
-	} else {
-		body = "## What\n\n"
+	root, err := project.FindRoot()
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Build body from --section flags (validates names against config).
+	// An empty sections list produces an empty body.
+	body, err := buildBodyFromSections(sections, cfg.Tasks.Sections)
+	if err != nil {
+		return err
 	}
 
 	t := task.Task{
@@ -94,14 +110,6 @@ func runTaskCreate(sessionPartial, title, description, priority string, tags []s
 		Body:     body,
 	}
 
-	root, err := project.FindRoot()
-	if err != nil {
-		return err
-	}
-	cfg, err := config.Load(root)
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
 	store := task.NewStore(root, &cfg)
 
 	// Resolve and overwrite session field if --session was supplied.
@@ -210,20 +218,23 @@ func runTaskLS(sessionPartial, statusStr, priorityStr, tagStr string, asJSON boo
 // --- logos task refer --------------------------------------------------------
 
 var taskReferCmd = &cobra.Command{
-	Use:   "refer <name>",
+	Use:   "refer",
 	Short: "Print the content of a task file",
 	Long: `Print a task file to stdout. Use --summary to print only the sections
 listed in config.tasks.summary_sections (saves tokens). Use --with-session to
 also append the summary of the linked session.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		name, _ := cmd.Flags().GetString("name")
 		summary, _ := cmd.Flags().GetBool("summary")
 		withSession, _ := cmd.Flags().GetBool("with-session")
-		return runTaskRefer(args[0], summary, withSession)
+		return runTaskRefer(name, summary, withSession)
 	},
 }
 
 func init() {
+	taskReferCmd.Flags().StringP("name", "n", "", "Task name to look up (exact or partial match against filename or title)")
+	_ = taskReferCmd.MarkFlagRequired("name")
 	taskReferCmd.Flags().Bool("summary", false, "Print only summary sections (saves tokens)")
 	taskReferCmd.Flags().Bool("with-session", false, "Append the linked session summary")
 }
@@ -279,22 +290,25 @@ func runTaskRefer(nameOrPartial string, summary, withSession bool) error {
 // --- logos task update -------------------------------------------------------
 
 var taskUpdateCmd = &cobra.Command{
-	Use:   "update <name>",
+	Use:   "update",
 	Short: "Update task fields",
-	Long: `Update frontmatter fields of a task. Supported flags: --status,
+	Long: `Update frontmatter fields of a task. Supported flags: --name, --status,
 --priority, --assignee. Setting --status done removes the task file after
 confirmation (use --force to skip the prompt).`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		name, _ := cmd.Flags().GetString("name")
 		statusStr, _ := cmd.Flags().GetString("status")
 		priorityStr, _ := cmd.Flags().GetString("priority")
 		assignee, _ := cmd.Flags().GetString("assignee")
 		force, _ := cmd.Flags().GetBool("force")
-		return runTaskUpdate(args[0], statusStr, priorityStr, assignee, force)
+		return runTaskUpdate(name, statusStr, priorityStr, assignee, force)
 	},
 }
 
 func init() {
+	taskUpdateCmd.Flags().StringP("name", "n", "", "Task name to update (exact or partial match against filename or title)")
+	_ = taskUpdateCmd.MarkFlagRequired("name")
 	taskUpdateCmd.Flags().String("status", "", "New status (open, in_progress, done, cancelled)")
 	taskUpdateCmd.Flags().String("priority", "", "New priority (high, medium, low)")
 	taskUpdateCmd.Flags().String("assignee", "", "New assignee")
@@ -427,18 +441,21 @@ func runTaskPurge(statusStr string, force bool) error {
 // --- logos task delete -------------------------------------------------------
 
 var taskDeleteCmd = &cobra.Command{
-	Use:   "delete <name>",
+	Use:   "delete",
 	Short: "Delete a task file",
 	Long: `Delete a task file from .logosyncx/tasks/. A confirmation prompt is
 shown unless --force is passed.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		name, _ := cmd.Flags().GetString("name")
 		force, _ := cmd.Flags().GetBool("force")
-		return runTaskDelete(args[0], force)
+		return runTaskDelete(name, force)
 	},
 }
 
 func init() {
+	taskDeleteCmd.Flags().StringP("name", "n", "", "Task name to delete (exact or partial match against filename or title)")
+	_ = taskDeleteCmd.MarkFlagRequired("name")
 	taskDeleteCmd.Flags().Bool("force", false, "Skip confirmation prompt")
 }
 
@@ -479,19 +496,22 @@ func runTaskDelete(nameOrPartial string, force bool) error {
 // --- logos task search -------------------------------------------------------
 
 var taskSearchCmd = &cobra.Command{
-	Use:   "search <keyword>",
+	Use:   "search",
 	Short: "Keyword search across task title, tags, and excerpt",
 	Long: `Case-insensitive keyword search across the title, tags, and excerpt
 (## What section) of every task. Optionally pre-filter by --status or --tag.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		keyword, _ := cmd.Flags().GetString("keyword")
 		statusStr, _ := cmd.Flags().GetString("status")
 		tagStr, _ := cmd.Flags().GetString("tag")
-		return runTaskSearch(args[0], statusStr, tagStr)
+		return runTaskSearch(keyword, statusStr, tagStr)
 	},
 }
 
 func init() {
+	taskSearchCmd.Flags().StringP("keyword", "k", "", "Keyword to search for (case-insensitive, matches title, tags, and excerpt)")
+	_ = taskSearchCmd.MarkFlagRequired("keyword")
 	taskSearchCmd.Flags().String("status", "", "Pre-filter by status before keyword match")
 	taskSearchCmd.Flags().StringP("tag", "t", "", "Pre-filter by tag before keyword match")
 }

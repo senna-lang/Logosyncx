@@ -5,11 +5,11 @@ This project uses **logos tasks** for issue tracking, stored in `.logosyncx/task
 ## Quick Reference
 
 ```bash
-logos task ls --status open --json          # Find available work
-logos task refer <name>                     # View task details
-logos task update <name> --status in_progress  # Claim work
-logos task update <name> --status done      # Complete work (deletes the file)
-logos sync                                  # Rebuild session and task indexes
+logos task ls --status open --json                        # Find available work
+logos task refer --name <name>                            # View task details
+logos task update --name <name> --status in_progress      # Claim work
+logos task update --name <name> --status done             # Complete work (deletes the file)
+logos sync                                                # Rebuild session and task indexes
 ```
 
 ## Landing the Plane (Session Completion)
@@ -20,7 +20,7 @@ logos sync                                  # Rebuild session and task indexes
 
 1. **File tasks for remaining work** - Create tasks for anything that needs follow-up (`logos task create --title "..." --session <current-session>`)
 2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update task status** - Close finished work (`logos task update <name> --status done --force`), update in-progress items
+3. **Update task status** - Close finished work (`logos task update --name <name> --status done --force`), update in-progress items
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase

@@ -8,7 +8,10 @@ Use it proactively to find relevant past decisions and designs.
 - When the user mentions a past discussion or asks about context: run `logos ls --json` and judge which sessions are relevant
 - When starting work on a feature: check `logos ls --json` for related sessions
 - When the user says "continue from last time": `logos refer` on the latest session
-- When the user says "save this session" or similar: run `logos save --topic "..." --body-stdin`
+- When the user says "save this session" or similar: run `logos save --topic "..." --section "Summary=..." --section "Key Decisions=..."`
+
+> **Always use flags** — never pass positional arguments to `logos` commands.
+> **Section content via --section only** — `--body` and `--body-stdin` do not exist. All body content must be provided as `--section "Name=content"` flags where `Name` is defined in `.logosyncx/config.json`.
 
 ## Workflow for finding relevant context
 
@@ -23,20 +26,15 @@ Use it proactively to find relevant past decisions and designs.
 logos save --topic "short description of the session" \
            --tag go --tag cli \
            --agent claude-code \
-           --body-stdin <<'EOF'
-## Summary
-
-What happened in this session.
-
-## Key Decisions
-
-- Decision one
-EOF
+           --section "Summary=What happened in this session." \
+           --section "Key Decisions=- Decision one"
 ```
 
-Or inline for short sessions:
+For longer content, use a variable:
 ```
-logos save --topic "quick fix" --body "## Summary\n\nFixed the bug."
+logos save --topic "short description" \
+           --section "Summary=Implemented the auth flow. Chose JWT over sessions because of stateless requirements." \
+           --section "Key Decisions=- JWT over sessions\n- RS256 algorithm"
 ```
 
 ## Commands
@@ -51,26 +49,33 @@ logos ls --json             # structured output with excerpts (preferred for age
 
 ### Read a session
 ```
-logos refer <filename>            # full content
-logos refer <partial-name>        # partial match
-logos refer <filename> --summary  # key sections only (saves tokens, prefer this)
+logos refer --name <filename>            # full content
+logos refer --name <partial-name>        # partial match
+logos refer --name <filename> --summary  # key sections only (saves tokens, prefer this)
 ```
 
 ### Save a session
 ```
-logos save --topic "..."                         # topic only, empty body
-logos save --topic "..." --body "..."            # inline body
-logos save --topic "..." --body-stdin            # body prose from stdin
-logos save --topic "..." --tag go --tag cli \
+# topic only, no body sections
+logos save --topic "..."
+
+# with section content (--section is the only way to add body content)
+logos save --topic "..." --section "Summary=text"
+logos save --topic "..." \
+           --tag go --tag cli \
            --agent claude-code \
            --related 2026-01-01_previous.md \
-           --body-stdin
+           --section "Summary=What happened." \
+           --section "Key Decisions=- Decision A"
 ```
+
+Allowed section names are defined in `.logosyncx/config.json` under `sessions.sections`.
+Unknown section names are rejected with an error.
 
 ### Search (keyword narrowing)
 ```
-logos search "keyword"         # search on topic, tags, and excerpt
-logos search "auth" --tag security
+logos search --keyword "keyword"              # search on topic, tags, and excerpt
+logos search --keyword "auth" --tag security
 ```
 
 ## Token strategy
@@ -93,17 +98,24 @@ Tasks are always linked to a session — the session serves as the rationale for
 
 ```
 logos task create --title "Implement the thing" \
-                  --description "Add X so that Y." \
                   --priority high \
                   --tag go --tag cli \
-                  --session <partial-session-name>
+                  --session <partial-session-name> \
+                  --section "What=Add X so that Y." \
+                  --section "Why=Required for the new auth flow."
 ```
+
+Allowed section names are defined in `.logosyncx/config.json` under `tasks.sections`.
+Unknown section names are rejected with an error.
+
+> All fields are passed as flags — never use positional arguments.
+> Section content must be provided via `--section "Name=content"`. There is no `--description` flag.
 
 ### Workflow for checking tasks
 
 1. Run `logos task ls --status open --json` to get a list of outstanding tasks
 2. Read `title` and `excerpt` to judge which tasks are relevant
-3. Run `logos task refer <name> --with-session` to get full task details plus the linked session summary
+3. Run `logos task refer --name <name> --with-session` to get full task details plus the linked session summary
 
 ### Commands
 
@@ -117,24 +129,28 @@ logos task ls --tag <tag>                 # filter by tag
 logos task ls --json                      # structured output with excerpts (preferred for agents)
 
 # Read a task
-logos task refer <name>                   # full content
-logos task refer <name> --summary         # key sections only (saves tokens)
-logos task refer <name> --with-session    # append linked session summary
+logos task refer --name <name>                   # full content
+logos task refer --name <name> --summary         # key sections only (saves tokens)
+logos task refer --name <name> --with-session    # append linked session summary
 
 # Create a task
-logos task create --title "..."                    # title only, medium priority
-logos task create --title "..." --description "..." --priority high --tag <tag>
-logos task create --title "..." --session <name>   # link to a session
+logos task create --title "..."                                        # title only, empty body
+logos task create --title "..." --section "What=..." --priority high --tag <tag>
+logos task create --title "..." --session <name>                       # link to a session
+logos task create --title "..." \
+                  --section "What=Implement X." \
+                  --section "Why=Needed for Y." \
+                  --section "Checklist=- [ ] step one\n- [ ] step two"
 
 # Update a task
-logos task update <name> --status in_progress  # moves file to tasks/in_progress/
-logos task update <name> --status done         # moves file to tasks/done/
-logos task update <name> --priority high
-logos task update <name> --assignee <name>
+logos task update --name <name> --status in_progress  # moves file to tasks/in_progress/
+logos task update --name <name> --status done         # moves file to tasks/done/
+logos task update --name <name> --priority high
+logos task update --name <name> --assignee <assignee>
 
 # Delete a single task
-logos task delete <name>                  # prompts for confirmation
-logos task delete <name> --force          # skip confirmation
+logos task delete --name <name>           # prompts for confirmation
+logos task delete --name <name> --force   # skip confirmation
 
 # Bulk-delete all tasks with a given status
 logos task purge --status done            # shows list + confirmation prompt
@@ -142,6 +158,6 @@ logos task purge --status done --force    # skip confirmation
 logos task purge --status cancelled --force
 
 # Search tasks
-logos task search "keyword"               # search title, tags, and excerpt
-logos task search "keyword" --status open
-logos task search "keyword" --tag <tag>
+logos task search --keyword "keyword"                    # search title, tags, and excerpt
+logos task search --keyword "keyword" --status open
+logos task search --keyword "keyword" --tag <tag>
