@@ -3,6 +3,8 @@ package cmd
 import (
 	"bytes"
 	"testing"
+
+	"github.com/senna-lang/logosyncx/internal/version"
 )
 
 func TestRootCommand_Help(t *testing.T) {
@@ -40,7 +42,7 @@ func TestVersionCommand(t *testing.T) {
 }
 
 func TestVersion_NotEmpty(t *testing.T) {
-	if Version == "" {
+	if version.Version == "" {
 		t.Error("Version should not be empty")
 	}
 }

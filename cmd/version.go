@@ -3,16 +3,15 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/senna-lang/logosyncx/internal/version"
 	"github.com/spf13/cobra"
 )
-
-var Version = "0.0.1"
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version of logos",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("logos version %s\n", Version)
+		fmt.Println(version.String())
 	},
 }
 

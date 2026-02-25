@@ -25,6 +25,9 @@ Use --json to get structured output with excerpts, suitable for agent consumptio
 		tag, _ := cmd.Flags().GetString("tag")
 		since, _ := cmd.Flags().GetString("since")
 		asJSON, _ := cmd.Flags().GetBool("json")
+		if asJSON {
+			suppressUpdateCheck = true
+		}
 		return runLS(tag, since, asJSON)
 	},
 }

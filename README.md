@@ -23,25 +23,56 @@ From that point on, any agent that reads `AGENTS.md` (Claude Code, Cursor, aider
 
 ## Installation
 
-### Build from source
-
-Requires [Go 1.21+](https://go.dev/dl/).
+### Homebrew (macOS / Linux)
 
 ```sh
-git clone https://github.com/senna-lang/logosyncx.git
-cd logosyncx
-go build -o logos .
-mv logos /usr/local/bin/   # or anywhere on your $PATH
+brew install senna-lang/tap/logos
 ```
+
+### curl | bash (Linux / macOS / CI)
+
+```sh
+curl -sSfL https://raw.githubusercontent.com/senna-lang/Logosyncx/main/scripts/install.sh | bash
+```
+
+The script detects your OS and architecture, downloads the correct pre-built binary from
+[GitHub Releases](https://github.com/senna-lang/Logosyncx/releases/latest), verifies the
+SHA256 checksum, and installs `logos` to `~/.local/bin`.
+
+Pin a specific version:
+
+```sh
+curl -sSfL https://raw.githubusercontent.com/senna-lang/Logosyncx/main/scripts/install.sh | \
+  LOGOS_VERSION=v0.2.0 bash
+```
+
+### Direct download
+
+Download the pre-built binary for your platform from the
+[latest GitHub Release](https://github.com/senna-lang/Logosyncx/releases/latest),
+extract the archive, and place the `logos` binary somewhere on your `$PATH`.
+
+### go install (Go developers)
+
+```sh
+go install github.com/senna-lang/logosyncx@latest
+```
+
+Requires Go 1.21+.
 
 ### Verify
 
 ```sh
 logos version
-# logos version 0.0.1
+# logos v0.1.0 (darwin/arm64)
 ```
 
-> **Homebrew tap and pre-built binaries are planned for a future release.**
+### Updating
+
+```sh
+logos update          # self-update to the latest release
+brew upgrade logos    # if installed via Homebrew
+```
 
 ---
 

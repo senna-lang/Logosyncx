@@ -150,6 +150,9 @@ Use --json for structured output suitable for agent consumption.`,
 		priorityStr, _ := cmd.Flags().GetString("priority")
 		tagStr, _ := cmd.Flags().GetString("tag")
 		asJSON, _ := cmd.Flags().GetBool("json")
+		if asJSON {
+			suppressUpdateCheck = true
+		}
 		return runTaskLS(sessionPartial, statusStr, priorityStr, tagStr, asJSON)
 	},
 }
