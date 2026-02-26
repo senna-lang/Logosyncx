@@ -1,8 +1,8 @@
 # Logosyncx
 
-> Shared AI agent conversation context — stored in git, no external database required.
+> Git-native session memory and task management infrastructure for AI agents.
 
-**Logosyncx** (`logos`) is a CLI tool that lets AI agents save, search, and retrieve past session summaries inside your git repository. Team members and agents share context simply by running `git pull` — no embedding servers, no vector databases, no extra services.
+**Logosyncx** (`logos`) is a CLI tool that gives AI agents two things: **session memory** — a searchable record of past decisions and discussions — and **task management** — a structured backlog of what to do next. Both live as plain markdown files in your git repository, so the whole team shares context with a simple `git pull`. No embedding servers, no vector databases, no extra services.
 
 ---
 
@@ -15,7 +15,10 @@ Use `logos` CLI for session context management.
 Full reference: .logosyncx/USAGE.md
 ```
 
-From that point on, any agent that reads `AGENTS.md` (Claude Code, Cursor, aider, etc.) automatically knows how to use `logos` to find past decisions and save new context.
+From that point on, any agent that reads `AGENTS.md` (Claude Code, Cursor, aider, etc.) automatically knows how to use `logos` to recall past decisions and manage tasks.
+
+**Sessions answer "why"** — they record what was discussed, what was decided, and the reasoning behind it.
+**Tasks answer "what"** — they track what needs to be done, and can link back to the session that motivated them.
 
 **Agents handle their own semantic search** — `logos ls --json` returns all sessions with excerpts, and the LLM itself judges which ones are relevant. No embedding API needed.
 
