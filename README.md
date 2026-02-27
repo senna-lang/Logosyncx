@@ -461,6 +461,15 @@ make test  # run tests
 The pre-commit hook automatically blocks commits that include unformatted files.
 If the hook fires, run `make fmt` and re-stage your changes.
 
+### Keeping documentation in sync
+
+When adding, removing, or changing any CLI command, flag, or behaviour, update **both** of the following files:
+
+1. **`.logosyncx/USAGE.md`** — the live agent-facing reference used in this repository.
+2. **`cmd/init.go` (`usageMD` constant)** — the template written to `.logosyncx/USAGE.md` when a user runs `logos init` in a new project.
+
+Both files must be updated together so that new projects initialised with `logos init` receive accurate documentation.
+
 ---
 
 ## License
