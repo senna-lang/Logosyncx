@@ -7,8 +7,8 @@
 		"excerpt_section": "Summary",
 		"sections": [
 			{ "name": "Summary", "level": 2, "required": true },
-			{ "name": "Key Decisions", "level": 2, "required": false },
-			{ "name": "Context Used", "level": 2, "required": false },
+			{ "name": "Key Decisions", "level": 2, "required": true },
+			{ "name": "Context Used", "level": 2, "required": true },
 			{ "name": "Notes", "level": 2, "required": false },
 			{ "name": "Raw Conversation", "level": 2, "required": false }
 		]
@@ -20,9 +20,9 @@
 		"excerpt_section": "What",
 		"sections": [
 			{ "name": "What", "level": 2, "required": true },
-			{ "name": "Why", "level": 2, "required": false },
-			{ "name": "Scope", "level": 2, "required": false },
-			{ "name": "Checklist", "level": 2, "required": false },
+			{ "name": "Why", "level": 2, "required": true },
+			{ "name": "Scope", "level": 2, "required": true },
+			{ "name": "Checklist", "level": 2, "required": true },
 			{ "name": "Notes", "level": 2, "required": false }
 		]
 	},
