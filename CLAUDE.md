@@ -74,6 +74,15 @@ Sessions are plain markdown files with YAML frontmatter (`id`, `date`, `topic`, 
 - The project is currently in the design phase — `ClaudeLogoSyncDesign.md` is the authoritative spec.
 - **Language policy: all code, comments, commit messages, issue titles/descriptions, and documentation must be written in English.**
 
+### Documentation Update Checklist
+
+When adding, removing, or changing any CLI command, flag, or behaviour, check whether the following files need to be updated:
+
+1. **`.logosyncx/USAGE.md`** — the live agent-facing reference used in this repository.
+2. **`cmd/init.go` (`usageMD` constant)** — the template written to `.logosyncx/USAGE.md` when a user runs `logos init` in a new project. Must stay in sync with the live USAGE.md above.
+
+Both files must be updated together whenever the CLI surface changes.
+
 ## Logosyncx
 
 Use `logos` CLI for session context management.
