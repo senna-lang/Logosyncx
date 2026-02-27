@@ -78,6 +78,17 @@ logos search --keyword "keyword"              # search on topic, tags, and excer
 logos search --keyword "auth" --tag security
 ```
 
+## Sync index
+
+If you manually edit, add, or delete session or task files, run:
+
+```
+logos sync
+```
+
+This rebuilds both `index.jsonl` and `task-index.jsonl` from the filesystem so that
+`logos ls` and `logos task ls` return accurate results.
+
 ## Token strategy
 - Use `logos ls --json` first to scan all sessions cheaply via excerpts
 - Use `--summary` on `refer` unless you need the full conversation log

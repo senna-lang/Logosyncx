@@ -16,7 +16,7 @@ This project uses **logos tasks** for issue tracking, stored in `.logosyncx/task
 logos task ls --status open --json                        # Find available work
 logos task refer --name <name>                            # View task details
 logos task update --name <name> --status in_progress      # Claim a task
-logos task update --name <name> --status done             # Complete a task (deletes the file)
+logos task update --name <name> --status done             # Complete a task (moves file to tasks/done/)
 logos sync                                                # Rebuild session and task indexes
 ```
 
