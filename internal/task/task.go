@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -118,22 +119,12 @@ func (t *Task) ToJSON() TaskJSON {
 
 // IsValidStatus reports whether s is a recognised Status constant.
 func IsValidStatus(s Status) bool {
-	for _, v := range ValidStatuses {
-		if s == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ValidStatuses, s)
 }
 
 // IsValidPriority reports whether p is a recognised Priority constant.
 func IsValidPriority(p Priority) bool {
-	for _, v := range ValidPriorities {
-		if p == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ValidPriorities, p)
 }
 
 // ParseOptions controls optional behaviour of Parse.

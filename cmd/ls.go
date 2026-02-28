@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"text/tabwriter"
 	"time"
 
@@ -146,11 +147,8 @@ func filterSince(entries []index.Entry, since time.Time) []index.Entry {
 func filterTag(entries []index.Entry, tag string) []index.Entry {
 	var out []index.Entry
 	for _, e := range entries {
-		for _, t := range e.Tags {
-			if t == tag {
-				out = append(out, e)
-				break
-			}
+		if slices.Contains(e.Tags, tag) {
+			out = append(out, e)
 		}
 	}
 	return out

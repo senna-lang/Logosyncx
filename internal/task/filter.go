@@ -1,7 +1,10 @@
 // Package task provides filtering logic for task lists.
 package task
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // Filter holds the criteria used to narrow down a list of tasks.
 // Zero values mean "no constraint" — only non-zero fields are applied.
@@ -81,13 +84,9 @@ func matchesJSONFilter(e TaskJSON, f Filter) bool {
 		lower := strings.ToLower(f.Keyword)
 		titleMatch := strings.Contains(strings.ToLower(e.Title), lower)
 		excerptMatch := strings.Contains(strings.ToLower(e.Excerpt), lower)
-		tagMatch := false
-		for _, tag := range e.Tags {
-			if strings.Contains(strings.ToLower(tag), lower) {
-				tagMatch = true
-				break
-			}
-		}
+		tagMatch := slices.ContainsFunc(e.Tags, func(tag string) bool {
+			return strings.Contains(strings.ToLower(tag), lower)
+		})
 		if !titleMatch && !excerptMatch && !tagMatch {
 			return false
 		}
@@ -133,30 +132,20 @@ func matchesFilter(t *Task, f Filter) bool {
 // hasAnyTag reports whether taskTags contains at least one tag from wantTags
 // (case-insensitive comparison).
 func hasAnyTag(taskTags, wantTags []string) bool {
-	for _, want := range wantTags {
+	return slices.ContainsFunc(wantTags, func(want string) bool {
 		lower := strings.ToLower(want)
-		for _, have := range taskTags {
-			if strings.ToLower(have) == lower {
-				return true
-			}
-		}
-	}
-	return false
+		return slices.ContainsFunc(taskTags, func(have string) bool {
+			return strings.ToLower(have) == lower
+		})
+	})
 }
 
 // matchesKeyword reports whether t's title, any tag, or excerpt contains
 // lower (already lower-cased) as a substring.
 func matchesKeyword(t *Task, lower string) bool {
-	if strings.Contains(strings.ToLower(t.Title), lower) {
-		return true
-	}
-	for _, tag := range t.Tags {
-		if strings.Contains(strings.ToLower(tag), lower) {
-			return true
-		}
-	}
-	if strings.Contains(strings.ToLower(t.Excerpt), lower) {
-		return true
-	}
-	return false
+	return strings.Contains(strings.ToLower(t.Title), lower) ||
+		slices.ContainsFunc(t.Tags, func(tag string) bool {
+			return strings.Contains(strings.ToLower(tag), lower)
+		}) ||
+		strings.Contains(strings.ToLower(t.Excerpt), lower)
 }
