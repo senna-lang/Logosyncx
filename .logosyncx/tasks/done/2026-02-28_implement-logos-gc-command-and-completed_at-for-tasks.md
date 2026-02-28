@@ -2,7 +2,7 @@
 id: t-b3c0b3
 date: 2026-02-28T11:36:58.619658+09:00
 title: Implement logos gc command and completed_at for tasks
-status: in_progress
+status: done
 priority: medium
 session: 2026-02-28_session-gc-design-logos-gc-command-and-completed_at-field.md
 tags:
@@ -11,6 +11,7 @@ tags:
     - tasks
     - go
 assignee: ""
+completed_at: 2026-02-28T11:46:52.30439+09:00
 ---
 
 ## What
