@@ -2,7 +2,7 @@
 id: t-39fd98
 date: 2026-02-28T10:46:58.548556+09:00
 title: Improve agent-facing instructions to increase command compliance
-status: open
+status: done
 priority: high
 session: ""
 tags:
