@@ -488,6 +488,10 @@ func TestMigrate_PreservesExistingValues(t *testing.T) {
 			"summary_sections": ["What"],
 			"excerpt_section": "What",
 			"sections": []
+		},
+		"gc": {
+			"linked_task_done_days": 30,
+			"orphan_session_days": 90
 		}
 	}`
 

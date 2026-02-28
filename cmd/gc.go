@@ -45,7 +45,9 @@ Run "logos gc purge" to permanently delete all archived sessions.`,
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		linkedDays, _ := cmd.Flags().GetInt("linked-days")
 		orphanDays, _ := cmd.Flags().GetInt("orphan-days")
-		return runGC(dryRun, linkedDays, orphanDays)
+		linkedChanged := cmd.Flags().Changed("linked-days")
+		orphanChanged := cmd.Flags().Changed("orphan-days")
+		return runGC(dryRun, linkedDays, orphanDays, linkedChanged, orphanChanged)
 	},
 }
 
@@ -65,8 +67,8 @@ was archived before running this command.`,
 
 func init() {
 	gcCmd.Flags().Bool("dry-run", false, "Preview candidates without moving any files")
-	gcCmd.Flags().Int("linked-days", 30, "Days since task completion before a linked session is archived")
-	gcCmd.Flags().Int("orphan-days", 90, "Days since creation before a session with no linked tasks is archived")
+	gcCmd.Flags().Int("linked-days", 0, "Days since task completion before a linked session is archived (default from config: 30)")
+	gcCmd.Flags().Int("orphan-days", 0, "Days since creation before a session with no linked tasks is archived (default from config: 90)")
 
 	gcPurgeCmd.Flags().Bool("force", false, "Skip confirmation prompt")
 
@@ -94,7 +96,7 @@ type gcCandidate struct {
 
 // --- core logic --------------------------------------------------------------
 
-func runGC(dryRun bool, linkedDays, orphanDays int) error {
+func runGC(dryRun bool, linkedDays, orphanDays int, linkedChanged, orphanChanged bool) error {
 	root, err := project.FindRoot()
 	if err != nil {
 		return err
@@ -102,6 +104,14 @@ func runGC(dryRun bool, linkedDays, orphanDays int) error {
 	cfg, err := config.Load(root)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Fall back to config values when flags were not explicitly set.
+	if !linkedChanged {
+		linkedDays = cfg.GC.LinkedTaskDoneDays
+	}
+	if !orphanChanged {
+		orphanDays = cfg.GC.OrphanSessionDays
 	}
 
 	candidates, err := findGCCandidates(root, &cfg, linkedDays, orphanDays)

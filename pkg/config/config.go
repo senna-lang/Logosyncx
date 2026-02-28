@@ -27,6 +27,13 @@ var requiredTaskKeys = []string{
 	"sections",
 }
 
+// requiredGcKeys lists the JSON keys that must be present in the
+// "gc" object for a config.json to be considered up-to-date.
+var requiredGcKeys = []string{
+	"linked_task_done_days",
+	"orphan_session_days",
+}
+
 const (
 	DirName        = ".logosyncx"
 	ConfigFileName = "config.json"
@@ -72,6 +79,20 @@ type TasksConfig struct {
 	Sections []SectionConfig `json:"sections"`
 }
 
+// GcConfig holds settings that control the session garbage-collection behaviour
+// of `logos gc`. Thresholds here serve as project-wide defaults; they can be
+// overridden on the command line with --linked-days and --orphan-days.
+type GcConfig struct {
+	// LinkedTaskDoneDays is the number of days that must have elapsed since
+	// the latest linked task was completed before a session becomes a strong
+	// GC candidate. Falls back to session creation date when completed_at is
+	// not recorded. Default: 30.
+	LinkedTaskDoneDays int `json:"linked_task_done_days"`
+	// OrphanSessionDays is the number of days since a session was created
+	// before it becomes a weak GC candidate (no linked tasks). Default: 90.
+	OrphanSessionDays int `json:"orphan_session_days"`
+}
+
 // GitConfig holds settings related to git automation behaviour.
 type GitConfig struct {
 	// AutoPush, when true, makes logos save automatically run git commit and
@@ -94,6 +115,7 @@ type Config struct {
 	Tasks      TasksConfig    `json:"tasks"`
 	Privacy    PrivacyConfig  `json:"privacy"`
 	Git        GitConfig      `json:"git"`
+	GC         GcConfig       `json:"gc"`
 }
 
 // defaultSessionSections mirrors the sections that were previously defined in
@@ -137,6 +159,10 @@ func Default(projectName string) Config {
 		},
 		Privacy: PrivacyConfig{
 			FilterPatterns: []string{},
+		},
+		GC: GcConfig{
+			LinkedTaskDoneDays: 30,
+			OrphanSessionDays:  90,
 		},
 	}
 }
@@ -268,6 +294,21 @@ func isMigrationNeeded(raw map[string]json.RawMessage) bool {
 		}
 	}
 
+	// gc sub-keys.
+	gcRaw, ok := raw["gc"]
+	if !ok {
+		return true
+	}
+	var gcMap map[string]json.RawMessage
+	if err := json.Unmarshal(gcRaw, &gcMap); err != nil {
+		return true
+	}
+	for _, key := range requiredGcKeys {
+		if _, ok := gcMap[key]; !ok {
+			return true
+		}
+	}
+
 	return false
 }
 
@@ -308,5 +349,11 @@ func applyDefaults(cfg *Config, projectRoot string) {
 	}
 	if cfg.Privacy.FilterPatterns == nil {
 		cfg.Privacy.FilterPatterns = []string{}
+	}
+	if cfg.GC.LinkedTaskDoneDays == 0 {
+		cfg.GC.LinkedTaskDoneDays = 30
+	}
+	if cfg.GC.OrphanSessionDays == 0 {
+		cfg.GC.OrphanSessionDays = 90
 	}
 }
