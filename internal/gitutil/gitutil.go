@@ -1,6 +1,6 @@
 // Package gitutil provides helpers for automating git operations via go-git
 // and os/exec.  It covers git add (staging), git rm (staging deletions),
-// git commit, and git push.
+// git commit, git push, and git status queries.
 package gitutil
 
 import (
@@ -8,9 +8,67 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	gogit "github.com/go-git/go-git/v5"
 )
+
+// StatusCode is a single-character git status indicator (e.g. 'M', 'A', '?', ' ').
+type StatusCode byte
+
+const (
+	StatusUnmodified StatusCode = ' '
+	StatusUntracked  StatusCode = '?'
+	StatusAdded      StatusCode = 'A'
+	StatusModified   StatusCode = 'M'
+	StatusDeleted    StatusCode = 'D'
+	StatusRenamed    StatusCode = 'R'
+)
+
+// FileStatus holds the staging-area and worktree status of a single file,
+// as reported by git status --porcelain.
+type FileStatus struct {
+	Path     string     // path relative to the repository root
+	Staging  StatusCode // index (staging area) status
+	Worktree StatusCode // working tree status
+}
+
+// StatusUnderDir returns the git status of every file whose path starts with
+// prefix (relative to projectRoot, e.g. ".logosyncx/").
+// It uses the system git binary so that sparse-checkout, worktree, and other
+// local git configuration are honoured automatically.
+func StatusUnderDir(projectRoot, prefix string) ([]FileStatus, error) {
+	cmd := exec.Command("git", "status", "--porcelain", "--", prefix)
+	cmd.Dir = projectRoot
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errOut
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("git status: %w\n%s", err, errOut.String())
+	}
+
+	var entries []FileStatus
+	for _, line := range strings.Split(out.String(), "\n") {
+		// Each porcelain line is at least "XY PATH" (4 chars minimum).
+		if len(line) < 4 {
+			continue
+		}
+		x := StatusCode(line[0])
+		y := StatusCode(line[1])
+		// line[2] is always a space in porcelain v1 format.
+		path := strings.TrimSpace(line[3:])
+		if path == "" {
+			continue
+		}
+		entries = append(entries, FileStatus{
+			Path:     path,
+			Staging:  x,
+			Worktree: y,
+		})
+	}
+	return entries, nil
+}
 
 // Add stages the file at filePath in the git repository that contains
 // projectRoot. filePath must be an absolute path; it is converted to a

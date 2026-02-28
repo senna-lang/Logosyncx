@@ -1,8 +1,8 @@
 ---
 id: t-bdsa1j
 date: 2026-02-21T10:42:59.064774+09:00
-title: "[Phase2] Implement logos status command"
-status: open
+title: '[Phase2] Implement logos status command'
+status: in_progress
 priority: medium
 session: ""
 tags:

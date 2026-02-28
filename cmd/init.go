@@ -112,6 +112,29 @@ logos search --keyword "keyword"              # search on topic, tags, and excer
 logos search --keyword "auth" --tag security
 ` + "```" + `
 
+## Check uncommitted changes
+
+` + "```" + `
+logos status
+` + "```" + `
+
+Shows all files under ` + "`.logosyncx/`" + ` that are staged, unstaged, or untracked —
+grouped by state. Useful for agents to confirm that ` + "`logos save`" + ` or
+` + "`logos task create`" + ` actually persisted before ending a session.
+
+Output example:
+` + "```" + `
+Staged (ready to commit):
+  (added)      sessions/2026-02-28_my-session.md
+
+Untracked (not staged):
+  (new)        tasks/open/2026-02-28_my-task.md
+
+Run ` + "`git add .logosyncx/ && git commit`" + ` to commit the above.
+` + "```" + `
+
+This command is informational and never modifies any file or git state.
+
 ## Sync index
 
 If you manually edit, add, or delete session or task files, run:
