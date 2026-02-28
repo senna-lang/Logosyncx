@@ -30,7 +30,8 @@ type Session struct {
 	Topic   string     `yaml:"topic"`
 	Tags    []string   `yaml:"tags"`
 	Agent   string     `yaml:"agent"`
-	Related []string   `yaml:"related"`
+	Related []string   `yaml:"related"` // session→session links
+	Tasks   []string   `yaml:"tasks"`   // session→task links (task filenames)
 
 	// Derived fields (not written to frontmatter)
 	Filename string `yaml:"-"`

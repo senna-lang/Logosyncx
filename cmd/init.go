@@ -95,9 +95,13 @@ logos save --topic "..." \
            --tag go --tag cli \
            --agent claude-code \
            --related 2026-01-01_previous.md \
+           --task <partial-task-name> \
            --section "Summary=What happened." \
            --section "Key Decisions=- Decision A"
 ` + "```" + `
+
+Use ` + "`--task`" + ` to link this session to one or more existing tasks (partial name match, repeatable).
+The resolved task filenames are stored in the session's ` + "`tasks:`" + ` frontmatter field.
 
 Allowed section names are defined in ` + "`.logosyncx/config.json`" + ` under ` + "`sessions.sections`" + `.
 Unknown section names are rejected with an error.
@@ -184,10 +188,11 @@ logos task create --title "..." \
                   --section "Checklist=- [ ] step one\n- [ ] step two"
 
 # Update a task
-logos task update --name <name> --status in_progress  # moves file to tasks/in_progress/
-logos task update --name <name> --status done         # moves file to tasks/done/
+logos task update --name <name> --status in_progress        # moves file to tasks/in_progress/
+logos task update --name <name> --status done               # moves file to tasks/done/
 logos task update --name <name> --priority high
 logos task update --name <name> --assignee <assignee>
+logos task update --name <name> --add-session <partial>     # link a session to this task
 
 # Delete a single task
 logos task delete --name <name>           # prompts for confirmation

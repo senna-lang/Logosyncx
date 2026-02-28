@@ -113,12 +113,14 @@ func runTaskCreate(sessionPartial, title, priority string, tags []string, sectio
 	store := task.NewStore(root, &cfg)
 
 	// Resolve and overwrite session field if --session was supplied.
+	// Write to both Session (backward compat) and Sessions (new list field).
 	if sessionPartial != "" {
 		resolved, err := store.ResolveSession(sessionPartial)
 		if err != nil {
 			return fmt.Errorf("resolve session %q: %w", sessionPartial, err)
 		}
 		t.Session = resolved
+		t.Sessions = []string{resolved}
 	}
 
 	// Warn but don't block on empty title.
@@ -239,7 +241,7 @@ func init() {
 	taskReferCmd.Flags().StringP("name", "n", "", "Task name to look up (exact or partial match against filename or title)")
 	_ = taskReferCmd.MarkFlagRequired("name")
 	taskReferCmd.Flags().Bool("summary", false, "Print only summary sections (saves tokens)")
-	taskReferCmd.Flags().Bool("with-session", false, "Append the linked session summary")
+	taskReferCmd.Flags().Bool("with-session", false, "Append the summary of all linked sessions")
 }
 
 func runTaskRefer(nameOrPartial string, summary, withSession bool) error {
@@ -273,15 +275,22 @@ func runTaskRefer(nameOrPartial string, summary, withSession bool) error {
 		fmt.Print(string(data))
 	}
 
-	if withSession && t.Session != "" {
-		fmt.Println()
-		fmt.Printf("--- linked session: %s ---\n", t.Session)
-
-		sessPath := fmt.Sprintf("%s/.logosyncx/sessions/%s", root, t.Session)
-		s, err := session.LoadFile(sessPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not load linked session %q: %v\n", t.Session, err)
-		} else {
+	if withSession {
+		// Collect all linked session filenames. Sessions (new field) takes
+		// precedence; fall back to the legacy single Session field.
+		sessionFilenames := t.Sessions
+		if len(sessionFilenames) == 0 && t.Session != "" {
+			sessionFilenames = []string{t.Session}
+		}
+		for _, sessFilename := range sessionFilenames {
+			fmt.Println()
+			fmt.Printf("--- linked session: %s ---\n", sessFilename)
+			sessPath := fmt.Sprintf("%s/.logosyncx/sessions/%s", root, sessFilename)
+			s, err := session.LoadFile(sessPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not load linked session %q: %v\n", sessFilename, err)
+				continue
+			}
 			sections := session.ExtractSections(s.Body, cfg.Sessions.SummarySections)
 			fmt.Println(sections)
 		}
@@ -304,8 +313,9 @@ confirmation (use --force to skip the prompt).`,
 		statusStr, _ := cmd.Flags().GetString("status")
 		priorityStr, _ := cmd.Flags().GetString("priority")
 		assignee, _ := cmd.Flags().GetString("assignee")
+		addSession, _ := cmd.Flags().GetString("add-session")
 		force, _ := cmd.Flags().GetBool("force")
-		return runTaskUpdate(name, statusStr, priorityStr, assignee, force)
+		return runTaskUpdate(name, statusStr, priorityStr, assignee, addSession, force)
 	},
 }
 
@@ -315,12 +325,13 @@ func init() {
 	taskUpdateCmd.Flags().String("status", "", "New status (open, in_progress, done, cancelled)")
 	taskUpdateCmd.Flags().String("priority", "", "New priority (high, medium, low)")
 	taskUpdateCmd.Flags().String("assignee", "", "New assignee")
+	taskUpdateCmd.Flags().String("add-session", "", "Partial name of a session to link to this task (appended to sessions list)")
 	taskUpdateCmd.Flags().Bool("force", false, "Skip confirmation prompt")
 }
 
-func runTaskUpdate(nameOrPartial, statusStr, priorityStr, assignee string, force bool) error {
-	if statusStr == "" && priorityStr == "" && assignee == "" {
-		return errors.New("provide at least one of --status, --priority, or --assignee")
+func runTaskUpdate(nameOrPartial, statusStr, priorityStr, assignee, addSession string, force bool) error {
+	if statusStr == "" && priorityStr == "" && assignee == "" && addSession == "" {
+		return errors.New("provide at least one of --status, --priority, --assignee, or --add-session")
 	}
 
 	if statusStr != "" && !task.IsValidStatus(task.Status(statusStr)) {
@@ -351,8 +362,21 @@ func runTaskUpdate(nameOrPartial, statusStr, priorityStr, assignee string, force
 		fields["assignee"] = assignee
 	}
 
-	if err := store.UpdateFields(nameOrPartial, fields); err != nil {
-		return fmt.Errorf("update task: %w", err)
+	if len(fields) > 0 {
+		if err := store.UpdateFields(nameOrPartial, fields); err != nil {
+			return fmt.Errorf("update task: %w", err)
+		}
+	}
+
+	if addSession != "" {
+		resolved, err := store.ResolveSession(addSession)
+		if err != nil {
+			return fmt.Errorf("resolve session %q: %w", addSession, err)
+		}
+		if err := store.AppendSession(nameOrPartial, resolved); err != nil {
+			return fmt.Errorf("link session to task: %w", err)
+		}
+		fmt.Printf("✓ Linked session %q to task %q.\n", resolved, nameOrPartial)
 	}
 
 	if statusStr != "" {
@@ -360,7 +384,7 @@ func runTaskUpdate(nameOrPartial, statusStr, priorityStr, assignee string, force
 		if task.Status(statusStr) == task.StatusDone {
 			fmt.Println("  Tip: run `logos task purge --status done --force` to delete all done tasks.")
 		}
-	} else {
+	} else if addSession == "" {
 		fmt.Printf("✓ Updated task %q.\n", nameOrPartial)
 	}
 	return nil

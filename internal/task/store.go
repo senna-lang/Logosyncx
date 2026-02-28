@@ -326,6 +326,49 @@ func (s *Store) Purge(status Status) (int, error) {
 	return count, nil
 }
 
+// AppendSession adds sessionFilename to the task's Sessions list (if not already present).
+// It also sets Session to sessionFilename if Session is currently empty (backward compat).
+// The task file is written back to disk and the index is rebuilt (best-effort).
+func (s *Store) AppendSession(nameOrPartial, sessionFilename string) error {
+	t, err := s.Get(nameOrPartial)
+	if err != nil {
+		return err
+	}
+
+	// Avoid duplicates.
+	for _, sf := range t.Sessions {
+		if sf == sessionFilename {
+			return nil
+		}
+	}
+	t.Sessions = append(t.Sessions, sessionFilename)
+
+	// Maintain Session field for backward compat: use the first entry.
+	if t.Session == "" {
+		t.Session = sessionFilename
+	}
+
+	path := s.taskPath(t.Status, t.Filename)
+	data, err := Marshal(*t)
+	if err != nil {
+		return fmt.Errorf("marshal task: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write task file: %w", err)
+	}
+
+	if s.cfg.Git.AutoPush {
+		_ = gitutil.Add(s.projectRoot, path)
+	}
+
+	_, _ = s.RebuildTaskIndex()
+	if s.cfg.Git.AutoPush {
+		_ = gitutil.Add(s.projectRoot, TaskIndexFilePath(s.projectRoot))
+	}
+
+	return nil
+}
+
 // ResolveSession finds the session filename in sessions/ that contains
 // partial as a case-insensitive substring.  Returns ErrNotFound if nothing
 // matches, ErrAmbiguous if more than one file matches.

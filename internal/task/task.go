@@ -53,7 +53,9 @@ type Task struct {
 	Title    string    `yaml:"title"`
 	Status   Status    `yaml:"status"`
 	Priority Priority  `yaml:"priority"`
-	Session  string    `yaml:"session"` // filename of the linked session (may be empty)
+	Session  string    `yaml:"session"`            // primary linked session filename (kept for backward compat)
+	Sessions []string  `yaml:"sessions,omitempty"` // task→session links (list of session filenames)
+	Related  []string  `yaml:"related,omitempty"`  // task→task links (list of task filenames)
 	Tags     []string  `yaml:"tags"`
 	Assignee string    `yaml:"assignee"`
 
@@ -73,6 +75,8 @@ type TaskJSON struct {
 	Status   Status    `json:"status"`
 	Priority Priority  `json:"priority"`
 	Session  string    `json:"session"`
+	Sessions []string  `json:"sessions"`
+	Related  []string  `json:"related"`
 	Tags     []string  `json:"tags"`
 	Assignee string    `json:"assignee"`
 	Excerpt  string    `json:"excerpt"`
@@ -85,6 +89,14 @@ func (t *Task) ToJSON() TaskJSON {
 	if tags == nil {
 		tags = []string{}
 	}
+	sessions := t.Sessions
+	if sessions == nil {
+		sessions = []string{}
+	}
+	related := t.Related
+	if related == nil {
+		related = []string{}
+	}
 	return TaskJSON{
 		ID:       t.ID,
 		Filename: t.Filename,
@@ -93,6 +105,8 @@ func (t *Task) ToJSON() TaskJSON {
 		Status:   t.Status,
 		Priority: t.Priority,
 		Session:  t.Session,
+		Sessions: sessions,
+		Related:  related,
 		Tags:     tags,
 		Assignee: t.Assignee,
 		Excerpt:  t.Excerpt,

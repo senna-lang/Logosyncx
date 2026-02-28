@@ -30,6 +30,7 @@ type Entry struct {
 	Tags     []string  `json:"tags"`
 	Agent    string    `json:"agent"`
 	Related  []string  `json:"related"`
+	Tasks    []string  `json:"tasks"` // session→task links
 	Excerpt  string    `json:"excerpt"`
 }
 
@@ -50,6 +51,10 @@ func FromSession(s session.Session) Entry {
 	if related == nil {
 		related = []string{}
 	}
+	tasks := s.Tasks
+	if tasks == nil {
+		tasks = []string{}
+	}
 	date := time.Now()
 	if s.Date != nil {
 		date = *s.Date
@@ -62,6 +67,7 @@ func FromSession(s session.Session) Entry {
 		Tags:     tags,
 		Agent:    s.Agent,
 		Related:  related,
+		Tasks:    tasks,
 		Excerpt:  s.Excerpt,
 	}
 }

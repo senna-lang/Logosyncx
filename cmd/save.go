@@ -13,6 +13,7 @@ import (
 
 	"github.com/senna-lang/logosyncx/internal/gitutil"
 	"github.com/senna-lang/logosyncx/internal/project"
+	"github.com/senna-lang/logosyncx/internal/task"
 	"github.com/senna-lang/logosyncx/pkg/config"
 	"github.com/senna-lang/logosyncx/pkg/index"
 	"github.com/senna-lang/logosyncx/pkg/session"
@@ -26,7 +27,7 @@ var saveCmd = &cobra.Command{
 	Long: `Save a session to .logosyncx/sessions/ using flag-based input.
 
   logos save --topic "..." [--tag <tag>] [--agent <agent>] \
-             [--related <session>] \
+             [--related <session>] [--task <task>] \
              [--section "Name=content"] [--section "Name2=content2"] ...
 
 Body content is provided exclusively via --section flags. Each --section value
@@ -34,6 +35,9 @@ must be formatted as "Name=content" where Name matches one of the section names
 defined in .logosyncx/config.json (sessions.sections). Unknown section names are
 rejected. --section may be repeated once per section; providing the same section
 name more than once is an error.
+
+Use --task to link this session to one or more existing tasks (partial name
+match). The resolved task filenames are stored in the session's tasks: field.
 
 When git.auto_push is false (the default), no git operations are performed —
 commit and push remain entirely the user's responsibility.
@@ -46,8 +50,9 @@ AI agents can share context with the team without manual git interaction.`,
 		tags, _ := cmd.Flags().GetStringArray("tag")
 		agent, _ := cmd.Flags().GetString("agent")
 		related, _ := cmd.Flags().GetStringArray("related")
+		taskPartials, _ := cmd.Flags().GetStringArray("task")
 		sections, _ := cmd.Flags().GetStringArray("section")
-		return runSave(topic, tags, agent, related, sections)
+		return runSave(topic, tags, agent, related, taskPartials, sections)
 	},
 }
 
@@ -56,11 +61,12 @@ func init() {
 	saveCmd.Flags().StringArray("tag", []string{}, "Tag to attach (repeatable: --tag go --tag cli)")
 	saveCmd.Flags().StringP("agent", "a", "", "Agent name (e.g. claude-code)")
 	saveCmd.Flags().StringArray("related", []string{}, "Related session filename (repeatable)")
+	saveCmd.Flags().StringArray("task", []string{}, "Task to link (partial name, repeatable: --task impl --task docs)")
 	saveCmd.Flags().StringArray("section", []string{}, "Section content as 'Name=content' (repeatable; name must be defined in config)")
 	rootCmd.AddCommand(saveCmd)
 }
 
-func runSave(topic string, tags []string, agent string, related []string, sections []string) error {
+func runSave(topic string, tags []string, agent string, related []string, taskPartials []string, sections []string) error {
 	if strings.TrimSpace(topic) == "" {
 		return errors.New("provide --topic <topic>")
 	}
@@ -71,6 +77,9 @@ func runSave(topic string, tags []string, agent string, related []string, sectio
 		Agent:   agent,
 		Related: related,
 	}
+
+	// Resolve --task partials to full task filenames before loading project
+	// root (we need root first, so this is deferred below).
 
 	var err error
 
@@ -92,6 +101,18 @@ func runSave(topic string, tags []string, agent string, related []string, sectio
 	cfg, err := config.Load(root)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Resolve --task partial names to canonical task filenames.
+	if len(taskPartials) > 0 {
+		store := task.NewStore(root, &cfg)
+		for _, partial := range taskPartials {
+			t, err := store.Get(partial)
+			if err != nil {
+				return fmt.Errorf("resolve task %q: %w", partial, err)
+			}
+			s.Tasks = append(s.Tasks, t.Filename)
+		}
 	}
 
 	// Build the body from --section flags.
