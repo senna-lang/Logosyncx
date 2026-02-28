@@ -16,17 +16,32 @@ import (
 const usageMD = `# Logosyncx Usage for AI Agents
 
 You have access to the ` + "`logos`" + ` CLI for managing session context.
-Use it proactively to find relevant past decisions and designs.
+` + "`logos`" + ` is a shell binary — call it via terminal/shell commands.
 
-## When to use
+---
 
-- When the user mentions a past discussion or asks about context: run ` + "`logos ls --json`" + ` and judge which sessions are relevant
-- When starting work on a feature: check ` + "`logos ls --json`" + ` for related sessions
-- When the user says "continue from last time": ` + "`logos refer`" + ` on the latest session
-- When the user says "save this session" or similar: run ` + "`logos save --topic \"...\" --section \"Summary=...\" --section \"Key Decisions=...\"`" + `
+## MANDATORY Triggers
 
-> **Always use flags** — never pass positional arguments to ` + "`logos`" + ` commands.
-> **Section content via --section only** — ` + "`--body`" + ` and ` + "`--body-stdin`" + ` do not exist. All body content must be provided as ` + "`--section \"Name=content\"`" + ` flags where ` + "`Name`" + ` is defined in ` + "`.logosyncx/config.json`" + `.
+The following are **not optional**. When any condition below occurs, you MUST run the corresponding command.
+
+| Condition | You MUST run |
+|---|---|
+| Starting any work session | ` + "`logos ls --json`" + ` (always, before doing anything else) |
+| User says "save this session", "log this", "記録して", "セッションを保存して" | ` + "`logos save --topic \"...\" --section \"Summary=...\" ...`" + ` |
+| User says "make that a task", "add a TODO", "タスクにして", "issueにして" | ` + "`logos task create --title \"...\" --section \"What=...\" ...`" + ` |
+| User says "continue from last time", "前回の続き", "show past context" | ` + "`logos ls --json`" + ` then ` + "`logos refer --name <name> --summary`" + ` |
+| User mentions a past feature, decision, or discussion | ` + "`logos ls --json`" + ` and check excerpts for relevance |
+
+> **Never say "I can't save sessions" or "I don't have access to logos."**
+> The ` + "`logos`" + ` binary is installed and available via shell. Always use it.
+
+### Syntax rules (apply to every command)
+
+- **Always use flags** — never pass positional arguments.
+- **Section content via ` + "`--section`" + ` only** — ` + "`--body`" + `, ` + "`--body-stdin`" + `, and ` + "`--description`" + ` do not exist.
+- All section names must be defined in ` + "`.logosyncx/config.json`" + `.
+
+---
 
 ## Workflow for finding relevant context
 
@@ -191,7 +206,15 @@ logos task search --keyword "keyword" --tag <tag>
 `
 
 // agentsLine is appended to AGENTS.md (or CLAUDE.md) by logos init.
-const agentsLine = "\n## Logosyncx\n\nUse `logos` CLI for session context management.\nFull reference: .logosyncx/USAGE.md\n"
+const agentsLine = "\n## Logosyncx\n\n" +
+	"Use `logos` CLI for session context management.\n" +
+	"Full reference: `.logosyncx/USAGE.md`\n\n" +
+	"**MANDATORY triggers:**\n\n" +
+	"- **Start of every session** → `logos ls --json` (check past context before doing anything)\n" +
+	"- User says \"save this session\" / \"記録して\" → `logos save --topic \"...\" --section \"Summary=...\" --section \"Key Decisions=...\"`\n" +
+	"- User says \"make that a task\" / \"タスクにして\" → `logos task create --title \"...\" --section \"What=...\"`\n" +
+	"- User says \"continue from last time\" / \"前回の続き\" → `logos ls --json` then `logos refer --name <name> --summary`\n\n" +
+	"Never use positional arguments. Never use `--body` or `--description`. All body content goes in `--section \"Name=content\"` flags.\n"
 
 var initCmd = &cobra.Command{
 	Use:   "init",
