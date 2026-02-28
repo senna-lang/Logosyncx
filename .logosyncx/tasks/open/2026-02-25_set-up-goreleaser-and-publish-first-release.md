@@ -3,7 +3,7 @@ id: t-09ee69
 date: 2026-02-25T21:17:55.197405+09:00
 title: Set up GoReleaser and publish first release
 status: open
-priority: high
+priority: low
 session: 2026-02-25_distribution-and-installation-design.md
 tags:
     - distribution
