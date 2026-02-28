@@ -2,7 +2,7 @@
 id: t-a77699
 date: 2026-02-28T10:56:16.282022+09:00
 title: Design and implement bidirectional session↔task cross-linking
-status: open
+status: done
 priority: high
 session: ""
 tags:
