@@ -2,7 +2,7 @@
 id: t-bdsa1j
 date: 2026-02-21T10:42:59.064774+09:00
 title: '[Phase2] Implement logos status command'
-status: in_progress
+status: done
 priority: medium
 session: ""
 tags:
@@ -10,6 +10,7 @@ tags:
     - cli
     - git
 assignee: ""
+completed_at: 2026-02-28T11:56:50.507002+09:00
 ---
 
 ## What
