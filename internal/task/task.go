@@ -48,16 +48,17 @@ var ValidPriorities = []Priority{PriorityHigh, PriorityMedium, PriorityLow}
 // Task represents a single task file stored in .logosyncx/tasks/.
 type Task struct {
 	// Frontmatter fields (serialised to/from YAML).
-	ID       string    `yaml:"id"`
-	Date     time.Time `yaml:"date"`
-	Title    string    `yaml:"title"`
-	Status   Status    `yaml:"status"`
-	Priority Priority  `yaml:"priority"`
-	Session  string    `yaml:"session"`            // primary linked session filename (kept for backward compat)
-	Sessions []string  `yaml:"sessions,omitempty"` // task→session links (list of session filenames)
-	Related  []string  `yaml:"related,omitempty"`  // task→task links (list of task filenames)
-	Tags     []string  `yaml:"tags"`
-	Assignee string    `yaml:"assignee"`
+	ID          string     `yaml:"id"`
+	Date        time.Time  `yaml:"date"`
+	Title       string     `yaml:"title"`
+	Status      Status     `yaml:"status"`
+	Priority    Priority   `yaml:"priority"`
+	Session     string     `yaml:"session"`            // primary linked session filename (kept for backward compat)
+	Sessions    []string   `yaml:"sessions,omitempty"` // task→session links (list of session filenames)
+	Related     []string   `yaml:"related,omitempty"`  // task→task links (list of task filenames)
+	Tags        []string   `yaml:"tags"`
+	Assignee    string     `yaml:"assignee"`
+	CompletedAt *time.Time `yaml:"completed_at,omitempty"` // set when status transitions to done or cancelled
 
 	// Derived fields — not written to frontmatter.
 	Filename string `yaml:"-"`
@@ -68,18 +69,19 @@ type Task struct {
 // TaskJSON is the shape used for --json output.  It includes all frontmatter
 // fields plus the derived Filename and Excerpt.
 type TaskJSON struct {
-	ID       string    `json:"id"`
-	Filename string    `json:"filename"`
-	Date     time.Time `json:"date"`
-	Title    string    `json:"title"`
-	Status   Status    `json:"status"`
-	Priority Priority  `json:"priority"`
-	Session  string    `json:"session"`
-	Sessions []string  `json:"sessions"`
-	Related  []string  `json:"related"`
-	Tags     []string  `json:"tags"`
-	Assignee string    `json:"assignee"`
-	Excerpt  string    `json:"excerpt"`
+	ID          string     `json:"id"`
+	Filename    string     `json:"filename"`
+	Date        time.Time  `json:"date"`
+	Title       string     `json:"title"`
+	Status      Status     `json:"status"`
+	Priority    Priority   `json:"priority"`
+	Session     string     `json:"session"`
+	Sessions    []string   `json:"sessions"`
+	Related     []string   `json:"related"`
+	Tags        []string   `json:"tags"`
+	Assignee    string     `json:"assignee"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	Excerpt     string     `json:"excerpt"`
 }
 
 // ToJSON converts a Task to its JSON-output representation.
@@ -98,18 +100,19 @@ func (t *Task) ToJSON() TaskJSON {
 		related = []string{}
 	}
 	return TaskJSON{
-		ID:       t.ID,
-		Filename: t.Filename,
-		Date:     t.Date,
-		Title:    t.Title,
-		Status:   t.Status,
-		Priority: t.Priority,
-		Session:  t.Session,
-		Sessions: sessions,
-		Related:  related,
-		Tags:     tags,
-		Assignee: t.Assignee,
-		Excerpt:  t.Excerpt,
+		ID:          t.ID,
+		Filename:    t.Filename,
+		Date:        t.Date,
+		Title:       t.Title,
+		Status:      t.Status,
+		Priority:    t.Priority,
+		Session:     t.Session,
+		Sessions:    sessions,
+		Related:     related,
+		Tags:        tags,
+		Assignee:    t.Assignee,
+		CompletedAt: t.CompletedAt,
+		Excerpt:     t.Excerpt,
 	}
 }
 

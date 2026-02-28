@@ -44,6 +44,68 @@ func SessionsDir(projectRoot string) string {
 	return filepath.Join(projectRoot, ".logosyncx", sessionsDirName)
 }
 
+// ArchiveDir returns the path to the archive subdirectory under sessions/.
+// Archived sessions are moved here by `logos gc` and are excluded from normal
+// index rebuilds and `logos ls` output.
+func ArchiveDir(projectRoot string) string {
+	return filepath.Join(projectRoot, ".logosyncx", sessionsDirName, "archive")
+}
+
+// Archive moves the session file identified by filename from sessions/ to
+// sessions/archive/.  The archive directory is created if it does not exist.
+// Returns the new absolute path of the archived file.
+func Archive(projectRoot, filename string) (string, error) {
+	src := filepath.Join(SessionsDir(projectRoot), filename)
+	dst := filepath.Join(ArchiveDir(projectRoot), filename)
+
+	if err := os.MkdirAll(ArchiveDir(projectRoot), 0o755); err != nil {
+		return "", fmt.Errorf("create archive dir: %w", err)
+	}
+
+	if err := os.Rename(src, dst); err != nil {
+		return "", fmt.Errorf("archive %s: %w", filename, err)
+	}
+	return dst, nil
+}
+
+// LoadArchived reads every .md file from sessions/archive/ and returns the
+// parsed sessions.  Files that fail to parse are skipped (non-fatal).
+func LoadArchived(projectRoot string) ([]Session, error) {
+	dir := ArchiveDir(projectRoot)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var sessions []Session
+	var errs []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", entry.Name(), err))
+			continue
+		}
+		s, err := Parse(entry.Name(), data)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", entry.Name(), err))
+			continue
+		}
+		sessions = append(sessions, s)
+	}
+
+	if len(errs) > 0 {
+		return sessions, fmt.Errorf("some archived session files could not be parsed:\n  %s",
+			strings.Join(errs, "\n  "))
+	}
+	return sessions, nil
+}
+
 // FilePath returns the canonical file path for a session inside the given project root.
 // The filename is derived from the session's Date and Topic: <date>_<topic>.md
 func FilePath(projectRoot string, s Session) string {

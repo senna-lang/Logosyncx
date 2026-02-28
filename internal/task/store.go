@@ -205,7 +205,14 @@ func (s *Store) UpdateFields(nameOrPartial string, fields map[string]string) err
 	for k, v := range fields {
 		switch k {
 		case "status":
-			t.Status = Status(v)
+			newStatus := Status(v)
+			// Record completion timestamp when transitioning to a terminal state.
+			if (newStatus == StatusDone || newStatus == StatusCancelled) &&
+				t.Status != StatusDone && t.Status != StatusCancelled {
+				now := time.Now()
+				t.CompletedAt = &now
+			}
+			t.Status = newStatus
 		case "priority":
 			t.Priority = Priority(v)
 		case "assignee":

@@ -123,6 +123,32 @@ logos sync
 This rebuilds both ` + "`index.jsonl`" + ` and ` + "`task-index.jsonl`" + ` from the filesystem so that
 ` + "`logos ls`" + ` and ` + "`logos task ls`" + ` return accurate results.
 
+## Archive stale sessions (GC)
+
+Over time sessions accumulate. Use ` + "`logos gc`" + ` to move stale sessions to
+` + "`sessions/archive/`" + ` without permanently deleting them.
+
+` + "```" + `
+logos gc --dry-run                  # preview candidates, do nothing
+logos gc                            # move stale sessions to sessions/archive/
+logos gc --linked-days 14           # override: archive linked sessions after 14 days
+logos gc --orphan-days 60           # override: archive orphan sessions after 60 days
+logos gc purge                      # confirm and permanently delete archived sessions
+logos gc purge --force              # skip confirmation
+` + "```" + `
+
+A session is a **strong candidate** (default: 30 days) when all its linked tasks are
+` + "`done`" + ` or ` + "`cancelled`" + ` and at least ` + "`--linked-days`" + ` have passed since the last task completed.
+
+A session is a **weak candidate** (default: 90 days) when it has no linked tasks and is
+older than ` + "`--orphan-days`" + `.
+
+Sessions with at least one linked task still ` + "`open`" + ` or ` + "`in_progress`" + ` are **protected** and
+will never be archived automatically.
+
+> Tip: link sessions to tasks via ` + "`logos save --task <partial>`" + ` so GC can use task
+> completion as the archival signal instead of raw age.
+
 ## Token strategy
 - Use ` + "`logos ls --json`" + ` first to scan all sessions cheaply via excerpts
 - Use ` + "`--summary`" + ` on ` + "`refer`" + ` unless you need the full conversation log
