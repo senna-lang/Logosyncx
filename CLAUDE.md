@@ -133,28 +133,36 @@ logos refer --name <filename> --summary
 logos save --topic "short description" --tag <tag> --agent <agent-name>
 ```
 
-Then open the created file and write the body using the template:
+Then immediately write the body — **a plan without a body is broken**:
 
 ```bash
-# Read the plan template first
+# 1. Read the plan template
 cat .logosyncx/templates/plan.md
 
-# Write the body directly into the plan file using the Write tool
+# 2. Write the body directly into the plan file using the Write tool
+#    (append after the closing --- of the frontmatter)
 ```
 
 Do NOT use `--section` flags — they do not exist in v2.
 
 ### When creating a task
 
+**CRITICAL: Create tasks ONE AT A TIME. A task without a body is broken.**
+
+For each task, follow this exact sequence before creating the next:
+
 ```bash
+# 1. Create the task
 logos task create --plan <plan-slug> --title "Implement the thing" --priority high
-```
 
-Then open the created TASK.md and write the body using the template:
-
-```bash
+# 2. Read the template
 cat .logosyncx/templates/task.md
+
+# 3. Write the body into the created TASK.md using the Write tool
+#    (path printed by logos task create)
 ```
+
+Do NOT batch-create multiple tasks without filling the body for each one first.
 
 ---
 
