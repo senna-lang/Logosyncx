@@ -36,45 +36,111 @@ func TestInit_CreatesLogosyncxDir(t *testing.T) {
 	}
 }
 
-func TestInit_CreatesSessionsDir(t *testing.T) {
+func TestInit_CreatesPlansDir(t *testing.T) {
 	dir := t.TempDir()
 	if err := runInitInDir(t, dir); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".logosyncx", "sessions")); os.IsNotExist(err) {
-		t.Error("expected .logosyncx/sessions/ to be created")
+	if _, err := os.Stat(filepath.Join(dir, ".logosyncx", "plans")); os.IsNotExist(err) {
+		t.Error("expected .logosyncx/plans/ to be created")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".logosyncx", "plans", "archive")); os.IsNotExist(err) {
+		t.Error("expected .logosyncx/plans/archive/ to be created")
 	}
 }
 
-func TestInit_CreatesTasksStatusSubdirs(t *testing.T) {
+func TestInit_CreatesKnowledgeDir(t *testing.T) {
 	dir := t.TempDir()
 	if err := runInitInDir(t, dir); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(dir, ".logosyncx", "knowledge")); os.IsNotExist(err) {
+		t.Error("expected .logosyncx/knowledge/ to be created")
+	}
+}
+
+func TestInit_CreatesTemplatesDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInitInDir(t, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".logosyncx", "templates")); os.IsNotExist(err) {
+		t.Error("expected .logosyncx/templates/ to be created")
+	}
+}
+
+func TestInit_CreatesTemplateFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInitInDir(t, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, name := range []string{"plan.md", "task.md", "knowledge.md"} {
+		path := filepath.Join(dir, ".logosyncx", "templates", name)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			t.Errorf("expected templates/%s to be created", name)
+		}
+	}
+}
+
+func TestInit_NoStatusSubdirs(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInitInDir(t, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// v2 does not create tasks/open/ etc.
 	for _, status := range []string{"open", "in_progress", "done", "cancelled"} {
 		path := filepath.Join(dir, ".logosyncx", "tasks", status)
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			t.Errorf("expected .logosyncx/tasks/%s/ to be created", status)
+		if _, err := os.Stat(path); err == nil {
+			t.Errorf("tasks/%s/ should NOT be created in v2", status)
 		}
 	}
 }
 
-func TestInit_DoesNotCreateFlatTasksDir(t *testing.T) {
+func TestInit_NoSessionsDir(t *testing.T) {
 	dir := t.TempDir()
 	if err := runInitInDir(t, dir); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// The tasks/ root still exists (it must, since it holds the subdirs),
-	// but task files should NOT live directly in it — only in subdirs.
-	tasksDir := filepath.Join(dir, ".logosyncx", "tasks")
-	entries, err := os.ReadDir(tasksDir)
-	if err != nil {
-		t.Fatalf("ReadDir tasks/: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, ".logosyncx", "sessions")); err == nil {
+		t.Error("sessions/ should NOT be created in v2")
 	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			t.Errorf("expected only subdirs in tasks/, found file %q", e.Name())
-		}
+}
+
+func TestInit_ConfigVersion2(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInitInDir(t, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".logosyncx", "config.json"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, `"version": "2"`) {
+		t.Errorf("config.json should have version 2, got: %s", content)
+	}
+	if strings.Contains(content, `"sessions"`) {
+		t.Error("config.json should not contain 'sessions' key in v2")
+	}
+	if !strings.Contains(content, `"plans"`) {
+		t.Error("config.json should contain 'plans' key in v2")
+	}
+	if !strings.Contains(content, `"knowledge"`) {
+		t.Error("config.json should contain 'knowledge' key in v2")
+	}
+}
+
+func TestInit_AlreadyInitialized_Error(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInitInDir(t, dir); err != nil {
+		t.Fatalf("first init failed: %v", err)
+	}
+	err := runInitInDir(t, dir)
+	if err == nil {
+		t.Fatal("expected error on second init, got nil")
+	}
+	if !strings.Contains(err.Error(), "already initialized") {
+		t.Errorf("expected 'already initialized' in error, got: %v", err)
 	}
 }
 
@@ -124,8 +190,7 @@ func TestInit_USAGEMDIncludesTasksSection(t *testing.T) {
 	if err := runInitInDir(t, dir); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	path := filepath.Join(dir, ".logosyncx", "USAGE.md")
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Join(dir, ".logosyncx", "USAGE.md"))
 	if err != nil {
 		t.Fatalf("USAGE.md not created: %v", err)
 	}
@@ -141,76 +206,60 @@ func TestInit_USAGEMDIncludesTasksSection(t *testing.T) {
 	}
 }
 
+func TestInit_USAGEMDIncludesDistillSection(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInitInDir(t, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".logosyncx", "USAGE.md"))
+	if err != nil {
+		t.Fatalf("USAGE.md not created: %v", err)
+	}
+	if !strings.Contains(string(data), "logos distill") {
+		t.Error("USAGE.md should contain logos distill reference")
+	}
+}
+
+func TestInit_ConfigHasPlansExcerptSection(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInitInDir(t, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+	if cfg.Plans.ExcerptSection == "" {
+		t.Error("expected plans.excerpt_section to be set in config.json")
+	}
+	if len(cfg.Plans.SummarySections) == 0 {
+		t.Error("expected plans.summary_sections to be populated in config.json")
+	}
+}
+
+func TestInit_ConfigHasTasksExcerptSection(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInitInDir(t, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+	if cfg.Tasks.ExcerptSection == "" {
+		t.Error("expected tasks.excerpt_section to be set in config.json")
+	}
+}
+
 func TestInit_DoesNotCreateTemplateMD(t *testing.T) {
 	dir := t.TempDir()
 	if err := runInitInDir(t, dir); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// template.md is abolished — section structure lives in config.json.
+	// template.md (old v1 file) should not be created.
 	path := filepath.Join(dir, ".logosyncx", "template.md")
 	if _, err := os.Stat(path); err == nil {
 		t.Error("template.md should not be created by logos init (sections are in config.json)")
-	}
-}
-
-func TestInit_ConfigHasSessionSections(t *testing.T) {
-	dir := t.TempDir()
-	if err := runInitInDir(t, dir); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	cfg, err := config.Load(dir)
-	if err != nil {
-		t.Fatalf("failed to load config: %v", err)
-	}
-	if len(cfg.Sessions.Sections) == 0 {
-		t.Fatal("expected save.sections to be populated in config.json")
-	}
-	// Summary must be the first section and required.
-	first := cfg.Sessions.Sections[0]
-	if first.Name != "Summary" {
-		t.Errorf("first session section should be 'Summary', got %q", first.Name)
-	}
-	if !first.Required {
-		t.Error("Summary section should be required")
-	}
-	if cfg.Sessions.ExcerptSection != "Summary" {
-		t.Errorf("excerpt_section should be 'Summary', got %q", cfg.Sessions.ExcerptSection)
-	}
-}
-
-func TestInit_ConfigHasTaskSections(t *testing.T) {
-	dir := t.TempDir()
-	if err := runInitInDir(t, dir); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	cfg, err := config.Load(dir)
-	if err != nil {
-		t.Fatalf("failed to load config: %v", err)
-	}
-	if len(cfg.Tasks.Sections) == 0 {
-		t.Fatal("expected tasks.sections to be populated in config.json")
-	}
-	// What must be the first section and required.
-	first := cfg.Tasks.Sections[0]
-	if first.Name != "What" {
-		t.Errorf("first task section should be 'What', got %q", first.Name)
-	}
-	if !first.Required {
-		t.Error("What section should be required")
-	}
-}
-
-func TestInit_ErrorIfAlreadyInitialized(t *testing.T) {
-	dir := t.TempDir()
-	if err := runInitInDir(t, dir); err != nil {
-		t.Fatalf("first init failed: %v", err)
-	}
-	err := runInitInDir(t, dir)
-	if err == nil {
-		t.Fatal("expected error on second init, got nil")
-	}
-	if !strings.Contains(err.Error(), "already initialized") {
-		t.Errorf("expected 'already initialized' in error, got: %v", err)
 	}
 }
 
@@ -238,7 +287,6 @@ func TestDetectAgentsFile_PrefersCLAUDEMD(t *testing.T) {
 
 func TestDetectAgentsFile_IgnoresCLAUDEMDIfAbsent(t *testing.T) {
 	dir := t.TempDir()
-	// Only AGENTS.md exists.
 	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("# Agents\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

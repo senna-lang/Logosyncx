@@ -1,26 +1,29 @@
 # Logosyncx
 
-> Git-native session memory and task management infrastructure for AI agents.
+> Git-native plan and task management infrastructure for AI agents.
 
-**Logosyncx** (`logos`) is a CLI tool that gives AI agents two things: **session memory** — a searchable record of past decisions and discussions — and **task management** — a structured backlog of what to do next. Both live as plain markdown files in your git repository, so the whole team shares context with a simple `git pull`. No embedding servers, no vector databases, no extra services.
+**Logosyncx** (`logos`) is a CLI tool that gives AI agents structured, persistent memory across sessions. Plans record **why** work was done and **what** was decided. Tasks track **what** to do next. Knowledge files distill completed plans into reusable learnings. Everything lives as plain markdown in your git repository — no external services required.
 
 ---
 
 ## How it works
 
-`logos init` creates a `.logosyncx/` directory in your project and appends one line to `AGENTS.md`:
+`logos init` creates a `.logosyncx/` directory in your project and adds a reference to your agents file (`AGENTS.md` or `CLAUDE.md`):
 
 ```
 Use `logos` CLI for session context management.
 Full reference: .logosyncx/USAGE.md
 ```
 
-From that point on, any agent that reads `AGENTS.md` (Claude Code, Cursor, aider, etc.) automatically knows how to use `logos` to recall past decisions and manage tasks.
+Any agent that reads your agents file automatically knows how to use `logos` to recall past decisions and manage work.
 
-**Sessions answer "why"** — they record what was discussed, what was decided, and the reasoning behind it.
-**Tasks answer "what"** — they track what needs to be done, and can link back to the session that motivated them.
+**Plans answer "why"** — they record what was discussed, what was decided, and the context behind it. They can depend on each other and are distilled into knowledge files when complete.
 
-**Agents handle their own semantic search** — `logos ls --json` returns all sessions with excerpts, and the LLM itself judges which ones are relevant. No embedding API needed.
+**Tasks answer "what"** — they track implementation steps inside a plan, with seq numbers, priority, and dependency tracking.
+
+**Knowledge files answer "what did we learn"** — distilled from completed plan walkthroughs, they become the long-term memory of the project.
+
+**Agents do their own semantic search** — `logos ls --json` returns all plans with excerpts, and the LLM judges relevance. No embedding API needed.
 
 ---
 
@@ -38,10 +41,6 @@ brew install senna-lang/tap/logos
 curl -sSfL https://raw.githubusercontent.com/senna-lang/Logosyncx/main/scripts/install.sh | bash
 ```
 
-The script detects your OS and architecture, downloads the correct pre-built binary from
-[GitHub Releases](https://github.com/senna-lang/Logosyncx/releases/latest), verifies the
-SHA256 checksum, and installs `logos` to `~/.local/bin`.
-
 Pin a specific version:
 
 ```sh
@@ -49,57 +48,39 @@ curl -sSfL https://raw.githubusercontent.com/senna-lang/Logosyncx/main/scripts/i
   LOGOS_VERSION=v0.2.0 bash
 ```
 
-### Direct download
-
-Download the pre-built binary for your platform from the
-[latest GitHub Release](https://github.com/senna-lang/Logosyncx/releases/latest),
-extract the archive, and place the `logos` binary somewhere on your `$PATH`.
-
-### go install (Go developers)
+### Go install
 
 ```sh
 go install github.com/senna-lang/logosyncx@latest
 ```
 
-Requires Go 1.21+.
-
-### Verify
-
-```sh
-logos version
-# logos v0.1.0 (darwin/arm64)
-```
-
-### Updating
-
-```sh
-logos update          # self-update to the latest release
-brew upgrade logos    # if installed via Homebrew
-```
-
 ---
 
-## Quick Start
+## Quick start
 
 ```sh
-# 1. Initialize Logosyncx in your project
-cd your-project
+# 1. Initialize in your project
+cd my-project
 logos init
 
-# 2. Save a session
-logos save --topic "auth refactor" \
-           --tag auth --tag jwt \
-           --section "Summary=Decided to migrate from session cookies to JWT. The new flow uses RS256 signing." \
-           --section "Key Decisions=- RS256 over HS256 for multi-service support\n- Refresh tokens stored in httpOnly cookies"
+# 2. Save a plan (scaffold only — write the body yourself)
+logos save --topic "Migrate auth to JWT" --tag auth --tag backend
 
-# 3. List all saved sessions
-logos ls
+# 3. Create tasks for the plan
+logos task create --plan "20260301-migrate-auth-to-jwt" --title "Update token signing" --priority high
+logos task create --plan "20260301-migrate-auth-to-jwt" --title "Add refresh token endpoint"
 
-# 4. Read a session
-logos refer --name auth-refactor --summary
+# 4. Work through tasks
+logos task update --name "update-token-signing" --status in_progress
+logos task update --name "update-token-signing" --status done   # creates WALKTHROUGH.md
 
-# 5. Search by keyword
-logos search --keyword "JWT"
+# 5. When all tasks are done, distill into knowledge
+logos distill --plan "20260301-migrate-auth-to-jwt"
+
+# 6. Commit everything
+git add .logosyncx/
+git commit -m "logos: distill migrate-auth-to-jwt"
+git push
 ```
 
 ---
@@ -108,76 +89,69 @@ logos search --keyword "JWT"
 
 ### `logos init`
 
-Initializes Logosyncx in the current directory.
+Initialize Logosyncx in the current directory. Creates:
 
-```sh
-logos init
 ```
-
-- Creates `.logosyncx/` with `config.json` and `USAGE.md`
-- Creates `.logosyncx/sessions/` and `.logosyncx/tasks/{open,in_progress,done,cancelled}/`
-- Appends a reference line to `AGENTS.md` (or `CLAUDE.md` if present)
-- Exits with an error if already initialized
+.logosyncx/
+├── config.json          # project config
+├── USAGE.md             # agent-facing command reference
+├── plans/               # plan markdown files
+│   └── archive/         # plans moved here by logos gc
+├── tasks/               # flat layout: <plan-slug>/NNN-<title>/TASK.md
+├── knowledge/           # distilled knowledge files
+└── templates/           # plan.md, task.md, knowledge.md templates
+```
 
 ---
 
 ### `logos save`
 
-Saves a session to `.logosyncx/sessions/` using flag-based input.
+Create a new plan file (scaffold + frontmatter only — write the body yourself).
 
 ```sh
-# Topic only (no body)
-logos save --topic "quick sync"
-
-# With sections
-logos save --topic "auth refactor" \
-           --tag auth --tag jwt \
-           --agent claude-code \
-           --related 2025-02-18_db-schema.md \
-           --section "Summary=Switched to JWT." \
-           --section "Key Decisions=- RS256 chosen for multi-service support"
+logos save --topic "Topic of this plan" [flags]
 ```
 
 | Flag | Short | Description |
 |------|-------|-------------|
-| `--topic` | `-t` | Session topic — required, used as the filename slug |
-| `--tag` | | Tag to attach — repeatable (`--tag go --tag cli`) |
+| `--topic` | `-t` | Plan topic — required |
+| `--tag` | | Tag — repeatable |
 | `--agent` | `-a` | Agent name (e.g. `claude-code`) |
-| `--related` | | Related session filename — repeatable |
-| `--section` | | Section content as `"Name=content"` — repeatable; name must be defined in `config.json` |
+| `--related` | | Related plan filename — repeatable |
+| `--depends-on` | | Plan this one depends on (partial name match) — repeatable |
 
-- `id` and `date` are auto-filled automatically
-- Saved as `<date>_<topic>.md` under `.logosyncx/sessions/`
-- By default (`git.auto_push: false`) no git operations are performed — commit and push are your responsibility
-- When `git.auto_push: true` in `config.json`, `git add`, `git commit`, and `git push` run automatically
+Plans with unresolved `--depends-on` dependencies (not yet distilled) cannot have tasks created against them.
+
+After running `logos save`, open the file and fill in the body using `.logosyncx/templates/plan.md` as a guide.
 
 ---
 
 ### `logos ls`
 
-Lists all saved sessions.
+List all plans.
 
 ```sh
-logos ls                        # human-readable table
-logos ls --tag auth             # filter by tag
-logos ls --since 2025-02-01     # filter by date
-logos ls --json                 # structured JSON output (for agents)
+logos ls [flags]
 ```
 
-`--json` includes `topic`, `tags`, and `excerpt` (first ~300 chars of the `## Summary` section).
-Agents read this list and decide which sessions to load — no separate search index needed.
+| Flag | Description |
+|------|-------------|
+| `--tag <tag>` | Filter by tag |
+| `--since <date>` | Filter to plans after date (YYYY-MM-DD) |
+| `--blocked` | Show only blocked plans |
+| `--json` | Output JSON with excerpts for agent consumption |
 
 ```json
 [
   {
-    "id": "a1b2c3",
-    "filename": "2025-02-20_auth-refactor.md",
-    "date": "2025-02-20T10:30:00Z",
-    "topic": "auth-refactor",
-    "tags": ["auth", "jwt"],
-    "agent": "claude-code",
-    "related": [],
-    "excerpt": "Decided to migrate from session cookies to JWT..."
+    "id": "p-abc123",
+    "filename": "20260301-migrate-auth-to-jwt.md",
+    "topic": "Migrate auth to JWT",
+    "date": "2026-03-01",
+    "tags": ["auth", "backend"],
+    "excerpt": "The current session-cookie auth cannot scale...",
+    "distilled": false,
+    "blocked": ""
   }
 ]
 ```
@@ -186,36 +160,89 @@ Agents read this list and decide which sessions to load — no separate search i
 
 ### `logos refer`
 
-Prints a session's content.
+Print a plan's content.
 
 ```sh
-logos refer --name 2025-02-20_auth-refactor.md   # full content
-logos refer --name auth                           # partial name match
-logos refer --name auth --summary                 # key sections only (saves tokens)
+logos refer --name <partial-name> [--summary]
 ```
 
-`--summary` returns only the sections listed in `sessions.summary_sections` in `config.json`
-(default: `Summary` and `Key Decisions`). Recommended for agents to keep token usage low.
+`--summary` returns only the sections listed in `plans.summary_sections` in `config.json` (default: `Background`, `Spec`). Use this to save tokens.
 
 ---
 
 ### `logos search`
 
-Keyword search across topic, tags, and excerpt.
+Keyword search across plan topic, tags, and excerpt.
 
 ```sh
-logos search --keyword "JWT"
-logos search --keyword "auth" --tag security
+logos search --keyword <word> [--json]
 ```
 
-Case-insensitive string match — useful for quickly narrowing candidates by keyword.
-For deeper semantic search, use `logos ls --json` and let the agent reason over the excerpts.
+---
+
+### `logos task`
+
+Manage tasks within a plan.
+
+```sh
+# Create
+logos task create --plan <plan-slug> --title "Title" [--priority high|medium|low] [--depends-on <seq>]
+
+# List
+logos task ls [--plan <plan-slug>] [--status open|in_progress|done] [--blocked] [--json]
+
+# View
+logos task refer --name <partial-name> [--plan <plan-slug>] [--summary]
+
+# Update
+logos task update --name <partial-name> --status <status> [--priority <p>] [--title <t>]
+
+# Search
+logos task search --keyword <word> [--plan <plan-slug>] [--json]
+
+# Walkthrough
+logos task walkthrough [--name <partial-name>] [--list]
+
+# Delete
+logos task delete --name <partial-name> [--force]
+```
+
+Tasks are stored as:
+
+```
+.logosyncx/tasks/<plan-slug>/NNN-<title>/
+├── TASK.md
+└── WALKTHROUGH.md    # created automatically when status → done
+```
+
+Marking a task `done` automatically creates a `WALKTHROUGH.md` scaffold. Write a walkthrough of what you did — this becomes source material for `logos distill`.
+
+---
+
+### `logos distill`
+
+Distill a completed plan into a knowledge file.
+
+```sh
+logos distill --plan <partial-name> [--force] [--dry-run]
+```
+
+Pre-flight checks (all hard errors):
+1. Plan not found
+2. No tasks found for the plan
+3. Incomplete tasks exist (open or in_progress)
+4. No WALKTHROUGH.md files found
+5. Plan already distilled (override with `--force`)
+
+`--dry-run` previews what would be written without creating any files.
+
+On success, creates a knowledge file in `.logosyncx/knowledge/` and marks the plan as `distilled: true`.
 
 ---
 
 ### `logos sync`
 
-Rebuilds the session and task indexes from disk. Run this after manually adding, editing, or deleting `.md` files.
+Rebuild the plan index and task index from disk. Run after manually editing `.md` files.
 
 ```sh
 logos sync
@@ -223,255 +250,154 @@ logos sync
 
 ---
 
-### `logos update`
+### `logos gc`
 
-Updates the `logos` binary to the latest release from GitHub.
+Garbage-collect old plans by moving them to `plans/archive/`.
 
 ```sh
-logos update           # download and install the latest release
-logos update --check   # check only; print status without installing
+logos gc [--linked-days <n>] [--orphan-days <n>] [--dry-run] [--force]
 ```
 
-Not available for development (`dev`) builds.
+| Candidate type | Condition |
+|----------------|-----------|
+| Strong (linked) | `distilled: true` + all tasks done + age >= `linked_task_done_days` (default: 30) |
+| Weak (orphan) | No tasks + age >= `orphan_plan_days` (default: 90) |
+
+`--dry-run` lists candidates without moving anything. `--force` skips the confirmation prompt.
 
 ---
 
-### `logos task`
+### `logos status`
 
-Manages tasks stored in `.logosyncx/tasks/`.
+Show uncommitted changes in `.logosyncx/`.
 
 ```sh
-# Create a task
-logos task create --title "Implement rate limiting" \
-                  --priority high \
-                  --tag go --tag auth \
-                  --session auth-refactor \
-                  --section "What=Add per-IP rate limiting to the auth endpoint." \
-                  --section "Checklist=- [ ] Implement middleware\n- [ ] Add tests"
-
-# List tasks
-logos task ls                              # human-readable table
-logos task ls --status open               # filter by status
-logos task ls --priority high             # filter by priority
-logos task ls --tag auth                  # filter by tag
-logos task ls --json                      # structured JSON output
-
-# Read a task
-logos task refer --name rate-limiting                       # full content
-logos task refer --name rate-limiting --summary             # key sections only
-logos task refer --name rate-limiting --with-session        # append linked session summary
-
-# Update a task
-logos task update --name rate-limiting --status in_progress
-logos task update --name rate-limiting --status done
-logos task update --name rate-limiting --priority medium
-logos task update --name rate-limiting --assignee alice
-
-# Search tasks
-logos task search --keyword "rate limit"
-logos task search --keyword "auth" --status open
-
-# Delete tasks
-logos task delete --name rate-limiting           # prompts for confirmation
-logos task delete --name rate-limiting --force   # skip confirmation
-logos task purge --status done                   # bulk-delete by status
-logos task purge --status done --force
+logos status
 ```
 
-`logos task create` flags:
+---
 
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--title` | `-T` | Task title — required |
-| `--priority` | `-p` | `high` / `medium` / `low` (default: `medium`) |
-| `--tag` | | Tag to attach — repeatable |
-| `--session` | `-s` | Partial name of the session to link |
-| `--section` | | Section content as `"Name=content"` — repeatable; name must be defined in `config.json` |
+### `logos update`
 
-Tasks are stored as markdown files in `.logosyncx/tasks/<status>/` and tracked in git alongside sessions.
+Update `logos` to the latest release.
+
+```sh
+logos update           # download and install
+logos update --check   # check only
+```
 
 ---
 
 ## Configuration
 
-`.logosyncx/config.json` is created by `logos init` and can be edited by hand:
+`.logosyncx/config.json`:
 
 ```json
 {
-  "version": "1",
+  "version": "2",
   "project": "my-project",
   "agents_file": "AGENTS.md",
-  "sessions": {
-    "summary_sections": ["Summary", "Key Decisions"],
-    "excerpt_section": "Summary",
-    "sections": [
-      { "name": "Summary",         "level": 2, "required": true  },
-      { "name": "Key Decisions",   "level": 2, "required": false },
-      { "name": "Context Used",    "level": 2, "required": false },
-      { "name": "Notes",           "level": 2, "required": false },
-      { "name": "Raw Conversation","level": 2, "required": false }
-    ]
+  "plans": {
+    "summary_sections": ["Background", "Spec"],
+    "excerpt_section": "Background"
   },
   "tasks": {
     "default_status": "open",
     "default_priority": "medium",
     "summary_sections": ["What", "Checklist"],
-    "excerpt_section": "What",
-    "sections": [
-      { "name": "What",      "level": 2, "required": true  },
-      { "name": "Why",       "level": 2, "required": false },
-      { "name": "Scope",     "level": 2, "required": false },
-      { "name": "Checklist", "level": 2, "required": false },
-      { "name": "Notes",     "level": 2, "required": false }
-    ]
+    "excerpt_section": "What"
+  },
+  "knowledge": {
+    "summary_sections": ["Summary", "Key Learnings"],
+    "excerpt_section": "Summary"
   },
   "privacy": {
     "filter_patterns": []
   },
   "git": {
     "auto_push": false
+  },
+  "gc": {
+    "linked_task_done_days": 30,
+    "orphan_plan_days": 90
   }
 }
 ```
 
-| Field | Description |
-|-------|-------------|
-| `agents_file` | The file `logos init` appends its reference line to |
-| `sessions.summary_sections` | Sections returned by `logos refer --summary` |
-| `sessions.excerpt_section` | Section used as the session excerpt in the index (default: `Summary`) |
-| `sessions.sections` | Ordered list of body sections for session files |
-| `tasks.summary_sections` | Sections returned by `logos task refer --summary` |
-| `tasks.excerpt_section` | Section used as the task excerpt in the index (default: `What`) |
-| `tasks.sections` | Ordered list of body sections for task files |
-| `privacy.filter_patterns` | Regex patterns — matching content triggers a warning on `logos save` |
-| `git.auto_push` | When `true`, `logos save` runs `git add`, `git commit`, and `git push` automatically |
+| Key | Description |
+|-----|-------------|
+| `plans.summary_sections` | Sections returned by `logos refer --summary` |
+| `plans.excerpt_section` | Section used as the plan excerpt in the index |
+| `tasks.excerpt_section` | Section used as the task excerpt in task ls |
+| `knowledge.excerpt_section` | Section used as the knowledge excerpt |
+| `gc.linked_task_done_days` | Days after task completion before a distilled plan is GC-eligible |
+| `gc.orphan_plan_days` | Days after creation before a plan with no tasks is GC-eligible |
 
 ---
 
-## Repository layout
+## Data layout
 
 ```
-your-project/
-├── AGENTS.md                        ← logos init appends here
-├── .logosyncx/
-│   ├── config.json
-│   ├── USAGE.md                     ← agent-facing command reference
-│   ├── index.jsonl                  ← session index (auto-managed)
-│   ├── task-index.jsonl             ← task index (auto-managed)
-│   ├── sessions/
-│   │   ├── 2025-02-20_auth-refactor.md
-│   │   └── 2025-02-18_db-schema.md
-│   └── tasks/
-│       ├── open/
-│       ├── in_progress/
-│       ├── done/
-│       └── cancelled/
-└── ... (your existing files)
+.logosyncx/
+├── config.json
+├── USAGE.md
+├── index.jsonl             # plan index (auto-managed)
+├── task-index.jsonl        # task index (auto-managed)
+├── plans/
+│   ├── 20260301-migrate-auth-to-jwt.md
+│   └── archive/
+├── tasks/
+│   └── 20260301-migrate-auth-to-jwt/
+│       ├── 001-update-token-signing/
+│       │   ├── TASK.md
+│       │   └── WALKTHROUGH.md
+│       └── 002-add-refresh-token-endpoint/
+│           └── TASK.md
+├── knowledge/
+│   └── 20260315-migrate-auth-to-jwt.md
+└── templates/
+    ├── plan.md
+    ├── task.md
+    └── knowledge.md
 ```
 
-`.logosyncx/` is committed to git. Context is shared across the team with a simple `git pull`.
-`sessions/` uses `<date>_<topic>.md` filenames so concurrent commits from multiple contributors never conflict.
+Plan filenames use `YYYYMMDD-<slug>.md` so concurrent contributions from multiple agents never conflict.
 
 ---
 
 ## Agent workflow example
 
 ```
-User: "I want to work on auth — is there any past context?"
+Agent: logos ls --json
+       # Scans excerpts. Finds "JWT auth" plan from last week.
 
-Agent:
-  1. Reads AGENTS.md → "Use logos CLI, see .logosyncx/USAGE.md"
-  2. Runs: logos ls --json
-  3. Reads excerpts, judges "2025-02-20_auth-refactor.md looks relevant"
-  4. Runs: logos refer --name auth-refactor --summary
-  5. Answers with awareness of past decisions
+Agent: logos refer --name jwt-auth --summary
+       # Gets Background + Spec. Confirms context without loading the full file.
 
---- later ---
+Agent: logos task ls --plan 20260301-migrate-auth-to-jwt --status open --json
+       # Finds open tasks. Claims one.
 
-User: "Save this session."
+Agent: logos task update --name update-token-signing --status in_progress
 
-Agent:
-  6. Runs: logos save --topic "auth middleware implementation" \
-                      --tag auth --tag go \
-                      --agent claude-code \
-                      --related 2025-02-20_auth-refactor.md \
-                      --section "Summary=Implemented JWT middleware for the auth service..." \
-                      --section "Key Decisions=- Used RS256 signing\n- Middleware applied at router level"
+       ... implements the task ...
+
+Agent: logos task update --name update-token-signing --status done
+       # WALKTHROUGH.md scaffold is auto-created. Agent writes the walkthrough.
+
+Agent: logos distill --plan 20260301-migrate-auth-to-jwt
+       # All tasks done + walkthroughs written → knowledge file created.
+
+Agent: git add .logosyncx/ && git commit -m "logos: distill jwt-auth"
+Agent: git push
 ```
-
-Semantic understanding is the agent's responsibility.
-Logosyncx focuses on storing and retrieving data — the LLM decides what is relevant.
 
 ---
 
-## Current status
+## Design principles
 
-| Command | Status |
-|---------|--------|
-| `logos version` | ✅ Available |
-| `logos init` | ✅ Available |
-| `logos save` | ✅ Available |
-| `logos ls` | ✅ Available |
-| `logos refer` | ✅ Available |
-| `logos search` | ✅ Available |
-| `logos sync` | ✅ Available |
-| `logos update` | ✅ Available |
-| `logos task` | ✅ Available |
-| `logos status` | 📅 Planned |
-
----
-
-## Development
-
-### Setup
-
-After cloning the repository, run `make setup` once to activate the git pre-commit hook:
-
-```sh
-git clone https://github.com/senna-lang/Logosyncx.git
-cd Logosyncx
-make setup
-```
-
-This configures `git config core.hooksPath scripts/hooks`, which activates a pre-commit hook that rejects commits containing unformatted Go files.
-
-### Available make targets
-
-| Target | Description |
-|--------|-------------|
-| `make setup` | Configure git hooks (run once after cloning) |
-| `make fmt` | Format all Go source files (`go fmt ./...`) |
-| `make lint` | Run static analysis (`go vet ./...`) |
-| `make test` | Run all tests (`go test ./...`) |
-| `make build` | Build the `logos` binary (version shows as `dev`) |
-| `make install` | Build and install to `~/bin/logos` |
-| `make clean` | Remove the built binary and `dist/` |
-| `make snapshot` | Build a local snapshot for all platforms via GoReleaser (no publish) |
-| `make release-dry-run` | Full release dry run — builds all platforms but does not publish |
-| `make release` | Tag HEAD and push to trigger the GitHub Actions release pipeline |
-
-### Before committing
-
-```sh
-make fmt   # fix formatting
-make lint  # check for issues
-make test  # run tests
-```
-
-The pre-commit hook automatically blocks commits that include unformatted files.
-If the hook fires, run `make fmt` and re-stage your changes.
-
-### Keeping documentation in sync
-
-When adding, removing, or changing any CLI command, flag, or behaviour, update **both** of the following files:
-
-1. **`.logosyncx/USAGE.md`** — the live agent-facing reference used in this repository.
-2. **`cmd/init.go` (`usageMD` constant)** — the template written to `.logosyncx/USAGE.md` when a user runs `logos init` in a new project.
-
-Both files must be updated together so that new projects initialised with `logos init` receive accurate documentation.
-
----
-
-## License
-
-MIT
+- **Agents do semantic search themselves** — `logos ls --json` returns excerpts; the LLM judges relevance. No vector DB or embedding API needed.
+- **Token budget awareness** — `logos refer --summary` exists so agents don't load full plans unnecessarily.
+- **Scaffold-only pattern** — CLI writes frontmatter; agents write the body using the Write tool. No `--section` flags.
+- **git add is automatic; git commit/push is the agent's responsibility** after `logos save`.
+- **No interactive prompts** — all commands are fully non-interactive and script-safe.
+- **Plain markdown** — every file is human-readable. No database, no binary formats.

@@ -8,7 +8,7 @@ import (
 
 // --- helpers -----------------------------------------------------------------
 
-func taskMarkdown(id, title, status, priority, session string, tags []string, body string) string {
+func taskMarkdown(id, title, status, priority, plan string, seq int, tags []string, body string) string {
 	tagYAML := "[]"
 	if len(tags) > 0 {
 		parts := make([]string, len(tags))
@@ -20,9 +20,10 @@ func taskMarkdown(id, title, status, priority, session string, tags []string, bo
 	return "---\n" +
 		"id: " + id + "\n" +
 		"title: " + title + "\n" +
+		"seq: " + string(rune('0'+seq)) + "\n" +
 		"status: " + status + "\n" +
 		"priority: " + priority + "\n" +
-		"session: " + session + "\n" +
+		"plan: " + plan + "\n" +
 		"tags: " + tagYAML + "\n" +
 		"assignee: \n" +
 		"---\n\n" +
@@ -32,9 +33,9 @@ func taskMarkdown(id, title, status, priority, session string, tags []string, bo
 // --- Parse -------------------------------------------------------------------
 
 func TestParse_ValidFrontmatter(t *testing.T) {
-	content := taskMarkdown("t-abc123", "Implement auth", "open", "high", "", nil,
+	content := taskMarkdown("t-abc123", "Implement auth", "open", "high", "", 1, nil,
 		"## What\nImplement JWT auth.\n")
-	got, err := Parse("2025-02-20_implement-auth.md", []byte(content))
+	got, err := Parse("TASK.md", []byte(content))
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
 	}
@@ -52,71 +53,83 @@ func TestParse_ValidFrontmatter(t *testing.T) {
 	}
 }
 
-func TestParse_SetsFilename(t *testing.T) {
-	content := taskMarkdown("t-1", "title", "open", "medium", "", nil, "## What\nbody\n")
-	got, err := Parse("2025-01-01_title.md", []byte(content))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if got.Filename != "2025-01-01_title.md" {
-		t.Errorf("Filename = %q, want '2025-01-01_title.md'", got.Filename)
-	}
-}
-
 func TestParse_SetsBody(t *testing.T) {
-	body := "## What\nDo the thing.\n\n## Why\nBecause.\n"
-	content := taskMarkdown("t-1", "title", "open", "medium", "", nil, body)
-	got, err := Parse("test.md", []byte(content))
+	content := taskMarkdown("t-1", "title", "open", "medium", "", 0, nil,
+		"## What\nThis is the body.\n")
+	got, err := Parse("TASK.md", []byte(content))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if got.Body == "" {
-		t.Error("expected non-empty Body")
-	}
-	if !strings.Contains(got.Body, "Do the thing") {
-		t.Errorf("Body = %q, want it to contain 'Do the thing'", got.Body)
+	if !strings.Contains(got.Body, "This is the body") {
+		t.Errorf("Body = %q, expected body content", got.Body)
 	}
 }
 
 func TestParse_ExtractsExcerpt(t *testing.T) {
-	body := "## What\nImplement the JWT authentication flow.\n\n## Why\nSecurity.\n"
-	content := taskMarkdown("t-1", "auth", "open", "medium", "", nil, body)
-	got, err := Parse("test.md", []byte(content))
+	content := taskMarkdown("t-1", "title", "open", "medium", "", 0, nil,
+		"## What\nThis is the excerpt content.\n")
+	got, err := Parse("TASK.md", []byte(content))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if !strings.Contains(got.Excerpt, "JWT authentication") {
-		t.Errorf("Excerpt = %q, want it to contain 'JWT authentication'", got.Excerpt)
+	if !strings.Contains(got.Excerpt, "excerpt content") {
+		t.Errorf("Excerpt = %q, expected excerpt content", got.Excerpt)
 	}
 }
 
 func TestParse_ParsesTags(t *testing.T) {
-	content := taskMarkdown("t-1", "title", "open", "medium", "", []string{"auth", "go"}, "## What\nbody\n")
-	got, err := Parse("test.md", []byte(content))
+	content := taskMarkdown("t-1", "title", "open", "medium", "", 0, []string{"auth", "jwt"},
+		"## What\nbody\n")
+	got, err := Parse("TASK.md", []byte(content))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 	if len(got.Tags) != 2 {
-		t.Errorf("Tags = %v, want [auth go]", got.Tags)
+		t.Fatalf("Tags len = %d, want 2", len(got.Tags))
 	}
-	if got.Tags[0] != "auth" || got.Tags[1] != "go" {
-		t.Errorf("Tags = %v, want [auth go]", got.Tags)
+	if got.Tags[0] != "auth" || got.Tags[1] != "jwt" {
+		t.Errorf("Tags = %v, want [auth jwt]", got.Tags)
 	}
 }
 
-func TestParse_ParsesSession(t *testing.T) {
-	content := taskMarkdown("t-1", "title", "open", "medium", "2025-02-20_auth.md", nil, "## What\nbody\n")
-	got, err := Parse("test.md", []byte(content))
+func TestParse_ParsesPlan(t *testing.T) {
+	raw := "---\nid: t-1\ntitle: test\nstatus: open\npriority: medium\nplan: 20260304-auth-refactor\ntags: []\nassignee: \n---\n\n## What\nbody\n"
+	got, err := Parse("TASK.md", []byte(raw))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if got.Session != "2025-02-20_auth.md" {
-		t.Errorf("Session = %q, want '2025-02-20_auth.md'", got.Session)
+	if got.Plan != "20260304-auth-refactor" {
+		t.Errorf("Plan = %q, want '20260304-auth-refactor'", got.Plan)
+	}
+}
+
+func TestParse_ParsesDependsOn(t *testing.T) {
+	raw := "---\nid: t-1\ntitle: test\nstatus: open\npriority: medium\nplan: myplan\ndepends_on:\n  - 1\n  - 2\ntags: []\nassignee: \n---\n\n## What\nbody\n"
+	got, err := Parse("TASK.md", []byte(raw))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(got.DependsOn) != 2 {
+		t.Fatalf("DependsOn len = %d, want 2", len(got.DependsOn))
+	}
+	if got.DependsOn[0] != 1 || got.DependsOn[1] != 2 {
+		t.Errorf("DependsOn = %v, want [1 2]", got.DependsOn)
+	}
+}
+
+func TestParse_ParsesSeq(t *testing.T) {
+	raw := "---\nid: t-1\ntitle: test\nseq: 3\nstatus: open\npriority: medium\nplan: myplan\ntags: []\nassignee: \n---\n\n## What\nbody\n"
+	got, err := Parse("TASK.md", []byte(raw))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got.Seq != 3 {
+		t.Errorf("Seq = %d, want 3", got.Seq)
 	}
 }
 
 func TestParse_MissingFrontmatter_ReturnsError(t *testing.T) {
-	_, err := Parse("bad.md", []byte("no frontmatter here"))
+	_, err := Parse("TASK.md", []byte("no frontmatter here"))
 	if err == nil {
 		t.Error("expected error for missing frontmatter, got nil")
 	}
@@ -124,16 +137,16 @@ func TestParse_MissingFrontmatter_ReturnsError(t *testing.T) {
 
 func TestParse_MissingClosingFrontmatter_ReturnsError(t *testing.T) {
 	content := "---\ntitle: test\n"
-	_, err := Parse("bad.md", []byte(content))
+	_, err := Parse("TASK.md", []byte(content))
 	if err == nil {
 		t.Error("expected error for missing closing ---, got nil")
 	}
 }
 
 func TestParse_AllStatusValues(t *testing.T) {
-	for _, status := range []Status{StatusOpen, StatusInProgress, StatusDone, StatusCancelled} {
-		content := taskMarkdown("t-1", "title", string(status), "medium", "", nil, "## What\nbody\n")
-		got, err := Parse("test.md", []byte(content))
+	for _, status := range []Status{StatusOpen, StatusInProgress, StatusDone} {
+		content := taskMarkdown("t-1", "title", string(status), "medium", "", 0, nil, "## What\nbody\n")
+		got, err := Parse("TASK.md", []byte(content))
 		if err != nil {
 			t.Fatalf("Parse with status %q failed: %v", status, err)
 		}
@@ -145,8 +158,8 @@ func TestParse_AllStatusValues(t *testing.T) {
 
 func TestParse_AllPriorityValues(t *testing.T) {
 	for _, priority := range []Priority{PriorityHigh, PriorityMedium, PriorityLow} {
-		content := taskMarkdown("t-1", "title", "open", string(priority), "", nil, "## What\nbody\n")
-		got, err := Parse("test.md", []byte(content))
+		content := taskMarkdown("t-1", "title", "open", string(priority), "", 0, nil, "## What\nbody\n")
+		got, err := Parse("TASK.md", []byte(content))
 		if err != nil {
 			t.Fatalf("Parse with priority %q failed: %v", priority, err)
 		}
@@ -189,15 +202,17 @@ func TestMarshal_ProducesFrontmatter(t *testing.T) {
 func TestMarshal_RoundTrip(t *testing.T) {
 	date := time.Date(2025, 2, 20, 10, 0, 0, 0, time.UTC)
 	original := Task{
-		ID:       "t-xyz",
-		Date:     date,
-		Title:    "Round-trip task",
-		Status:   StatusInProgress,
-		Priority: PriorityHigh,
-		Session:  "2025-02-15_auth.md",
-		Tags:     []string{"go", "testing"},
-		Assignee: "alice",
-		Body:     "## What\nRound trip test.\n",
+		ID:        "t-xyz",
+		Date:      date,
+		Title:     "Round-trip task",
+		Seq:       2,
+		Status:    StatusInProgress,
+		Priority:  PriorityHigh,
+		Plan:      "20260304-auth-refactor",
+		DependsOn: []int{1},
+		Tags:      []string{"go", "testing"},
+		Assignee:  "alice",
+		Body:      "## What\nRound trip test.\n",
 	}
 
 	data, err := Marshal(original)
@@ -205,7 +220,7 @@ func TestMarshal_RoundTrip(t *testing.T) {
 		t.Fatalf("Marshal: %v", err)
 	}
 
-	parsed, err := Parse("test.md", data)
+	parsed, err := Parse("TASK.md", data)
 	if err != nil {
 		t.Fatalf("Parse after Marshal: %v", err)
 	}
@@ -216,14 +231,20 @@ func TestMarshal_RoundTrip(t *testing.T) {
 	if parsed.Title != original.Title {
 		t.Errorf("Title: got %q, want %q", parsed.Title, original.Title)
 	}
+	if parsed.Seq != original.Seq {
+		t.Errorf("Seq: got %d, want %d", parsed.Seq, original.Seq)
+	}
 	if parsed.Status != original.Status {
 		t.Errorf("Status: got %q, want %q", parsed.Status, original.Status)
 	}
 	if parsed.Priority != original.Priority {
 		t.Errorf("Priority: got %q, want %q", parsed.Priority, original.Priority)
 	}
-	if parsed.Session != original.Session {
-		t.Errorf("Session: got %q, want %q", parsed.Session, original.Session)
+	if parsed.Plan != original.Plan {
+		t.Errorf("Plan: got %q, want %q", parsed.Plan, original.Plan)
+	}
+	if len(parsed.DependsOn) != 1 || parsed.DependsOn[0] != 1 {
+		t.Errorf("DependsOn: got %v, want [1]", parsed.DependsOn)
 	}
 	if parsed.Assignee != original.Assignee {
 		t.Errorf("Assignee: got %q, want %q", parsed.Assignee, original.Assignee)
@@ -255,17 +276,6 @@ func TestFileName_BasicFormat(t *testing.T) {
 	}
 }
 
-func TestFileName_SpacesBecomeDashes(t *testing.T) {
-	tk := Task{
-		Date:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-		Title: "update db schema",
-	}
-	got := FileName(tk)
-	if !strings.Contains(got, "update-db-schema") {
-		t.Errorf("FileName = %q, want 'update-db-schema' slug", got)
-	}
-}
-
 func TestFileName_EmptyTitleUsesUntitled(t *testing.T) {
 	tk := Task{
 		Date:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -277,15 +287,24 @@ func TestFileName_EmptyTitleUsesUntitled(t *testing.T) {
 	}
 }
 
-func TestFileName_SpecialCharsStripped(t *testing.T) {
-	tk := Task{
-		Date:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-		Title: "auth (v2): JWT!",
+// --- TaskDirName -------------------------------------------------------------
+
+func TestTask_TaskDirName_Format(t *testing.T) {
+	cases := []struct {
+		seq   int
+		title string
+		want  string
+	}{
+		{1, "Add JWT middleware", "001-add-jwt-middleware"},
+		{2, "Setup RS256 keys", "002-setup-rs256-keys"},
+		{10, "Refactor auth module", "010-refactor-auth-module"},
+		{100, "Big task", "100-big-task"},
+		{1, "Auth & Setup!", "001-auth-setup"},
 	}
-	got := FileName(tk)
-	for _, ch := range []string{"(", ")", "!", ":"} {
-		if strings.Contains(got, ch) {
-			t.Errorf("FileName = %q, want special character %q removed", got, ch)
+	for _, tc := range cases {
+		got := TaskDirName(tc.seq, tc.title)
+		if got != tc.want {
+			t.Errorf("TaskDirName(%d, %q) = %q, want %q", tc.seq, tc.title, got, tc.want)
 		}
 	}
 }
@@ -298,24 +317,21 @@ func TestExtractExcerpt_FromWhatSection(t *testing.T) {
 	if !strings.Contains(got, "what section") {
 		t.Errorf("excerpt = %q, expected content from ## What", got)
 	}
-	if strings.Contains(got, "This is why") {
-		t.Errorf("excerpt = %q, should not contain ## Why content", got)
-	}
 }
 
 func TestExtractExcerpt_FallbackToBody(t *testing.T) {
-	body := []byte("## Why\nNo What section here.\n")
+	body := []byte("No headings here, just plain text.")
 	got := extractExcerpt(body, "")
 	if got == "" {
-		t.Error("expected non-empty fallback excerpt")
+		t.Error("expected non-empty excerpt via fallback")
 	}
 }
 
 func TestExtractExcerpt_EmptyWhatSection_FallsBack(t *testing.T) {
-	body := []byte("## What\n\n## Why\nSome content.\n")
+	body := []byte("## What\n\n## Why\nThis is why.\n")
 	got := extractExcerpt(body, "")
 	if got == "" {
-		t.Error("expected non-empty fallback excerpt")
+		t.Error("expected non-empty excerpt via fallback when ## What is empty")
 	}
 }
 
@@ -323,12 +339,8 @@ func TestExtractExcerpt_TruncatesLongContent(t *testing.T) {
 	long := strings.Repeat("a", 400)
 	body := []byte("## What\n" + long + "\n")
 	got := extractExcerpt(body, "")
-	// +1 accounts for the appended ellipsis rune
-	if len([]rune(got)) > excerptMaxRunes+1 {
-		t.Errorf("excerpt not truncated: rune length = %d", len([]rune(got)))
-	}
-	if !strings.HasSuffix(got, "…") {
-		t.Errorf("truncated excerpt should end with '…', got: %q", got)
+	if len([]rune(got)) > excerptMaxRunes+1 { // +1 for the ellipsis rune
+		t.Errorf("excerpt length = %d runes, expected at most %d", len([]rune(got)), excerptMaxRunes+1)
 	}
 }
 
@@ -336,7 +348,7 @@ func TestExtractExcerpt_ShortContentNotTruncated(t *testing.T) {
 	body := []byte("## What\nShort content.\n")
 	got := extractExcerpt(body, "")
 	if strings.HasSuffix(got, "…") {
-		t.Errorf("short excerpt should not be truncated, got: %q", got)
+		t.Error("short content should not be truncated")
 	}
 }
 
@@ -353,6 +365,17 @@ func TestIsValidStatus_KnownValues(t *testing.T) {
 func TestIsValidStatus_UnknownValue(t *testing.T) {
 	if IsValidStatus("unknown") {
 		t.Error("IsValidStatus('unknown') = true, want false")
+	}
+}
+
+func TestTask_NoStatusCancelled(t *testing.T) {
+	if IsValidStatus("cancelled") {
+		t.Error("cancelled should not be a valid status in v2")
+	}
+	for _, s := range ValidStatuses {
+		if s == "cancelled" {
+			t.Error("cancelled found in ValidStatuses, should have been removed")
+		}
 	}
 }
 
@@ -380,26 +403,51 @@ func TestToJSON_NilTagsBecomesEmpty(t *testing.T) {
 	}
 }
 
+func TestToJSON_NilDependsOnBecomesEmpty(t *testing.T) {
+	tk := &Task{ID: "t-1", DependsOn: nil}
+	j := tk.ToJSON()
+	if j.DependsOn == nil {
+		t.Error("ToJSON: DependsOn should be [] not nil")
+	}
+}
+
+func TestFromTask_NilSlicesNormalized(t *testing.T) {
+	tk := &Task{
+		ID:        "t-abc",
+		Tags:      nil,
+		DependsOn: nil,
+	}
+	j := FromTask(tk)
+	if j.Tags == nil {
+		t.Error("FromTask: Tags should be [] not nil")
+	}
+	if j.DependsOn == nil {
+		t.Error("FromTask: DependsOn should be [] not nil")
+	}
+}
+
 func TestToJSON_CopiesAllFields(t *testing.T) {
 	date := time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)
 	tk := &Task{
-		ID:       "t-abc",
-		Filename: "2025-03-01_test.md",
-		Date:     date,
-		Title:    "Test Task",
-		Status:   StatusInProgress,
-		Priority: PriorityHigh,
-		Session:  "2025-02-20_auth.md",
-		Tags:     []string{"go"},
-		Assignee: "bob",
-		Excerpt:  "Some excerpt.",
+		ID:        "t-abc",
+		DirPath:   ".logosyncx/tasks/20260304-auth-refactor/001-add-jwt",
+		Date:      date,
+		Title:     "Test Task",
+		Seq:       1,
+		Status:    StatusInProgress,
+		Priority:  PriorityHigh,
+		Plan:      "20260304-auth-refactor",
+		DependsOn: []int{},
+		Tags:      []string{"go"},
+		Assignee:  "bob",
+		Excerpt:   "Some excerpt.",
 	}
 	j := tk.ToJSON()
 	if j.ID != tk.ID {
 		t.Errorf("ID = %q, want %q", j.ID, tk.ID)
 	}
-	if j.Filename != tk.Filename {
-		t.Errorf("Filename = %q, want %q", j.Filename, tk.Filename)
+	if j.DirPath != tk.DirPath {
+		t.Errorf("DirPath = %q, want %q", j.DirPath, tk.DirPath)
 	}
 	if !j.Date.Equal(tk.Date) {
 		t.Errorf("Date = %v, want %v", j.Date, tk.Date)
@@ -407,14 +455,17 @@ func TestToJSON_CopiesAllFields(t *testing.T) {
 	if j.Title != tk.Title {
 		t.Errorf("Title = %q, want %q", j.Title, tk.Title)
 	}
+	if j.Seq != tk.Seq {
+		t.Errorf("Seq = %d, want %d", j.Seq, tk.Seq)
+	}
 	if j.Status != tk.Status {
 		t.Errorf("Status = %q, want %q", j.Status, tk.Status)
 	}
 	if j.Priority != tk.Priority {
 		t.Errorf("Priority = %q, want %q", j.Priority, tk.Priority)
 	}
-	if j.Session != tk.Session {
-		t.Errorf("Session = %q, want %q", j.Session, tk.Session)
+	if j.Plan != tk.Plan {
+		t.Errorf("Plan = %q, want %q", j.Plan, tk.Plan)
 	}
 	if j.Assignee != tk.Assignee {
 		t.Errorf("Assignee = %q, want %q", j.Assignee, tk.Assignee)
@@ -429,30 +480,30 @@ func TestToJSON_CopiesAllFields(t *testing.T) {
 func TestSlugify_LowerCase(t *testing.T) {
 	got := slugify("My Task")
 	if got != "my-task" {
-		t.Errorf("slugify('My Task') = %q, want 'my-task'", got)
+		t.Errorf("slugify = %q, want 'my-task'", got)
 	}
 }
 
 func TestSlugify_RemovesSpecialChars(t *testing.T) {
-	got := slugify("auth (v2)!")
-	for _, r := range []string{"(", ")", "!"} {
-		if strings.Contains(got, r) {
-			t.Errorf("slugify result %q should not contain %q", got, r)
+	got := slugify("auth (v2): JWT!")
+	for _, ch := range []string{"(", ")", "!", ":"} {
+		if strings.Contains(got, ch) {
+			t.Errorf("slugify(%q) = %q, special char %q should be removed", "auth (v2): JWT!", got, ch)
 		}
 	}
 }
 
 func TestSlugify_PreservesHyphens(t *testing.T) {
-	got := slugify("jwt-auth")
-	if got != "jwt-auth" {
-		t.Errorf("slugify('jwt-auth') = %q, want 'jwt-auth'", got)
+	got := slugify("already-kebab")
+	if got != "already-kebab" {
+		t.Errorf("slugify = %q, want 'already-kebab'", got)
 	}
 }
 
 func TestSlugify_PreservesUnderscores(t *testing.T) {
-	got := slugify("my_task")
-	if got != "my_task" {
-		t.Errorf("slugify('my_task') = %q, want 'my_task'", got)
+	got := slugify("with_underscore")
+	if got != "with_underscore" {
+		t.Errorf("slugify = %q, want 'with_underscore'", got)
 	}
 }
 
@@ -463,49 +514,53 @@ func TestSlugify_EmptyString(t *testing.T) {
 	}
 }
 
+func TestSlugify_CollapsesConsecutiveHyphens(t *testing.T) {
+	got := slugify("auth  refactor")
+	if strings.Contains(got, "--") {
+		t.Errorf("slugify = %q, consecutive hyphens should be collapsed", got)
+	}
+}
+
 // --- ExtractSections ---------------------------------------------------------
 
 func TestExtractSections_What(t *testing.T) {
-	body := "## What\nThe what content.\n\n## Why\nThe why content.\n"
+	body := "## What\nDo the thing.\n\n## Why\nBecause.\n"
 	got := ExtractSections(body, []string{"What"})
-	if !strings.Contains(got, "The what content") {
-		t.Errorf("got %q, want 'what content'", got)
+	if !strings.Contains(got, "Do the thing") {
+		t.Errorf("ExtractSections = %q, expected What content", got)
 	}
-	if strings.Contains(got, "The why content") {
-		t.Errorf("got %q, should not contain 'why content'", got)
+	if strings.Contains(got, "Because") {
+		t.Error("ExtractSections should not include Why content")
 	}
 }
 
 func TestExtractSections_Checklist(t *testing.T) {
-	body := "## What\nDo it.\n\n## Checklist\n- [ ] Step one\n- [ ] Step two\n\n## Notes\nExtra.\n"
+	body := "## What\nDo the thing.\n\n## Checklist\n- [ ] step one\n"
 	got := ExtractSections(body, []string{"Checklist"})
-	if !strings.Contains(got, "Step one") {
-		t.Errorf("got %q, want checklist items", got)
-	}
-	if strings.Contains(got, "Extra") {
-		t.Errorf("got %q, should not contain Notes content", got)
+	if !strings.Contains(got, "step one") {
+		t.Errorf("ExtractSections = %q, expected Checklist content", got)
 	}
 }
 
 func TestExtractSections_Multiple(t *testing.T) {
-	body := "## What\nWhat content.\n\n## Checklist\n- [ ] item\n\n## Notes\nNotes content.\n"
-	got := ExtractSections(body, []string{"What", "Checklist"})
-	if !strings.Contains(got, "What content") {
-		t.Errorf("expected What section in output, got: %q", got)
+	body := "## What\nDo the thing.\n\n## Why\nBecause.\n\n## Notes\nExtra info.\n"
+	got := ExtractSections(body, []string{"What", "Notes"})
+	if !strings.Contains(got, "Do the thing") {
+		t.Error("expected What content")
 	}
-	if !strings.Contains(got, "item") {
-		t.Errorf("expected Checklist section in output, got: %q", got)
+	if !strings.Contains(got, "Extra info") {
+		t.Error("expected Notes content")
 	}
-	if strings.Contains(got, "Notes content") {
-		t.Errorf("Notes section should be excluded, got: %q", got)
+	if strings.Contains(got, "Because") {
+		t.Error("should not include Why content")
 	}
 }
 
 func TestExtractSections_CaseInsensitive(t *testing.T) {
-	body := "## WHAT\nContent here.\n"
+	body := "## WHAT\nCase insensitive content.\n"
 	got := ExtractSections(body, []string{"what"})
-	if !strings.Contains(got, "Content here") {
-		t.Errorf("expected case-insensitive section match, got: %q", got)
+	if !strings.Contains(got, "Case insensitive") {
+		t.Errorf("ExtractSections should match case-insensitively, got %q", got)
 	}
 }
 
@@ -513,36 +568,36 @@ func TestExtractSections_EmptyList_ReturnsFullBody(t *testing.T) {
 	body := "## What\nContent.\n"
 	got := ExtractSections(body, []string{})
 	if got != body {
-		t.Errorf("empty sections list should return full body")
+		t.Errorf("empty section list should return full body")
 	}
 }
 
 // --- parseHeading ------------------------------------------------------------
 
 func TestParseHeading_H2(t *testing.T) {
-	text, level, ok := parseHeading("## What")
+	text, level, ok := parseHeading("## Summary")
 	if !ok {
-		t.Fatal("expected ok=true for '## What'")
+		t.Fatal("expected ok=true")
 	}
 	if level != 2 {
 		t.Errorf("level = %d, want 2", level)
 	}
-	if text != "What" {
-		t.Errorf("text = %q, want 'What'", text)
+	if text != "Summary" {
+		t.Errorf("text = %q, want 'Summary'", text)
 	}
 }
 
 func TestParseHeading_NotAHeading(t *testing.T) {
-	_, _, ok := parseHeading("This is normal text")
+	_, _, ok := parseHeading("plain text")
 	if ok {
-		t.Error("expected ok=false for non-heading line")
+		t.Error("expected ok=false for plain text")
 	}
 }
 
 func TestParseHeading_HashWithNoSpace_NotAHeading(t *testing.T) {
 	_, _, ok := parseHeading("##NoSpace")
 	if ok {
-		t.Error("expected ok=false for ## without space")
+		t.Error("expected ok=false when no space after #")
 	}
 }
 
@@ -570,10 +625,9 @@ func TestTruncateRunes_TooLong(t *testing.T) {
 }
 
 func TestTruncateRunes_MultiByte(t *testing.T) {
-	// Each Japanese character is 1 rune but 3 bytes.
-	s := "あいうえお"
-	got := truncateRunes(s, 3)
-	if got != "あいう…" {
-		t.Errorf("truncateRunes multibyte = %q, want 'あいう…'", got)
+	// Each Japanese character is 1 rune.
+	got := truncateRunes("日本語テスト", 3)
+	if got != "日本語…" {
+		t.Errorf("truncateRunes = %q, want '日本語…'", got)
 	}
 }

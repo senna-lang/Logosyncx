@@ -7,22 +7,23 @@ import (
 	"time"
 
 	"github.com/senna-lang/logosyncx/pkg/index"
-	"github.com/senna-lang/logosyncx/pkg/session"
+	"github.com/senna-lang/logosyncx/pkg/plan"
 )
 
 // --- helpers -----------------------------------------------------------------
 
-func makeSearchSession(id, topic string, tags []string, excerpt string, date time.Time) session.Session {
-	return session.Session{
-		ID:      id,
-		Date:    &date,
-		Topic:   topic,
-		Tags:    tags,
-		Agent:   "claude-code",
-		Related: []string{},
-		// Embed the desired excerpt text in the ## Summary section so that
-		// session.Parse populates s.Excerpt with it.
-		Body: "## Summary\n" + excerpt + "\n\n## Key Decisions\n- Decision A\n",
+func makeSearchPlan(id, topic string, tags []string, excerpt string, date time.Time) plan.Plan {
+	return plan.Plan{
+		ID:       id,
+		Date:     &date,
+		Topic:    topic,
+		Tags:     tags,
+		Agent:    "claude-code",
+		Related:  []string{},
+		TasksDir: ".logosyncx/tasks/" + topic,
+		// Embed the desired excerpt text in the ## Background section so that
+		// plan parsing populates the excerpt during Rebuild.
+		Body: "## Background\n" + excerpt + "\n\n## Notes\n- Note A\n",
 	}
 }
 
@@ -55,16 +56,16 @@ func TestSearch_NoSessions_PrintsMessage(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(out, "No sessions found") {
-		t.Errorf("expected 'No sessions found', got: %q", out)
+	if !strings.Contains(out, "No plans found") {
+		t.Errorf("expected 'No plans found', got: %q", out)
 	}
 }
 
 // --- runSearch: keyword matching ---------------------------------------------
 
 func TestSearch_MatchesTopic(t *testing.T) {
-	s := makeSearchSession("id1", "jwt-authentication", []string{}, "Some summary.", time.Now())
-	setupProjectWithSessions(t, []session.Session{s})
+	s := makeSearchPlan("id1", "jwt-authentication", []string{}, "Some summary.", time.Now())
+	setupProjectWithPlans(t, []plan.Plan{s})
 
 	out := captureOutput(t, func() {
 		if err := runSearch("jwt", ""); err != nil {
@@ -78,8 +79,8 @@ func TestSearch_MatchesTopic(t *testing.T) {
 }
 
 func TestSearch_MatchesTag(t *testing.T) {
-	s := makeSearchSession("id1", "some-topic", []string{"security", "oauth"}, "Some summary.", time.Now())
-	setupProjectWithSessions(t, []session.Session{s})
+	s := makeSearchPlan("id1", "some-topic", []string{"security", "oauth"}, "Some summary.", time.Now())
+	setupProjectWithPlans(t, []plan.Plan{s})
 
 	out := captureOutput(t, func() {
 		if err := runSearch("oauth", ""); err != nil {
@@ -93,8 +94,8 @@ func TestSearch_MatchesTag(t *testing.T) {
 }
 
 func TestSearch_MatchesExcerpt(t *testing.T) {
-	s := makeSearchSession("id1", "refactor-session", []string{}, "We decided to migrate from REST to GraphQL.", time.Now())
-	setupProjectWithSessions(t, []session.Session{s})
+	s := makeSearchPlan("id1", "refactor-session", []string{}, "We decided to migrate from REST to GraphQL.", time.Now())
+	setupProjectWithPlans(t, []plan.Plan{s})
 
 	out := captureOutput(t, func() {
 		if err := runSearch("GraphQL", ""); err != nil {
@@ -108,8 +109,8 @@ func TestSearch_MatchesExcerpt(t *testing.T) {
 }
 
 func TestSearch_NoMatch_PrintsNoSessionsFound(t *testing.T) {
-	s := makeSearchSession("id1", "cache-layer", []string{"redis"}, "Redis caching strategy.", time.Now())
-	setupProjectWithSessions(t, []session.Session{s})
+	s := makeSearchPlan("id1", "cache-layer", []string{"redis"}, "Redis caching strategy.", time.Now())
+	setupProjectWithPlans(t, []plan.Plan{s})
 
 	out := captureOutput(t, func() {
 		if err := runSearch("kubernetes", ""); err != nil {
@@ -117,16 +118,16 @@ func TestSearch_NoMatch_PrintsNoSessionsFound(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(out, "No sessions found") {
-		t.Errorf("expected 'No sessions found', got: %q", out)
+	if !strings.Contains(out, "No plans found") {
+		t.Errorf("expected 'No plans found', got: %q", out)
 	}
 }
 
 // --- runSearch: case insensitivity -------------------------------------------
 
 func TestSearch_CaseInsensitive_Topic(t *testing.T) {
-	s := makeSearchSession("id1", "Database-Migration", []string{}, "Summary.", time.Now())
-	setupProjectWithSessions(t, []session.Session{s})
+	s := makeSearchPlan("id1", "Database-Migration", []string{}, "Summary.", time.Now())
+	setupProjectWithPlans(t, []plan.Plan{s})
 
 	out := captureOutput(t, func() {
 		if err := runSearch("DATABASE", ""); err != nil {
@@ -140,8 +141,8 @@ func TestSearch_CaseInsensitive_Topic(t *testing.T) {
 }
 
 func TestSearch_CaseInsensitive_Tag(t *testing.T) {
-	s := makeSearchSession("id1", "my-topic", []string{"GoLang"}, "Summary.", time.Now())
-	setupProjectWithSessions(t, []session.Session{s})
+	s := makeSearchPlan("id1", "my-topic", []string{"GoLang"}, "Summary.", time.Now())
+	setupProjectWithPlans(t, []plan.Plan{s})
 
 	out := captureOutput(t, func() {
 		if err := runSearch("golang", ""); err != nil {
@@ -155,8 +156,8 @@ func TestSearch_CaseInsensitive_Tag(t *testing.T) {
 }
 
 func TestSearch_CaseInsensitive_Excerpt(t *testing.T) {
-	s := makeSearchSession("id1", "api-design", []string{}, "Switched to OpenAPI specification.", time.Now())
-	setupProjectWithSessions(t, []session.Session{s})
+	s := makeSearchPlan("id1", "api-design", []string{}, "Switched to OpenAPI specification.", time.Now())
+	setupProjectWithPlans(t, []plan.Plan{s})
 
 	out := captureOutput(t, func() {
 		if err := runSearch("openapi", ""); err != nil {
@@ -173,11 +174,11 @@ func TestSearch_CaseInsensitive_Excerpt(t *testing.T) {
 
 func TestSearch_TagFilter_NarrowsResults(t *testing.T) {
 	now := time.Now()
-	sessions := []session.Session{
-		makeSearchSession("id1", "auth-login", []string{"auth"}, "JWT tokens.", now.Add(-2*time.Hour)),
-		makeSearchSession("id2", "payment-flow", []string{"billing"}, "JWT for payments.", now.Add(-1*time.Hour)),
+	plans := []plan.Plan{
+		makeSearchPlan("id1", "auth-login", []string{"auth"}, "JWT tokens.", now.Add(-2*time.Hour)),
+		makeSearchPlan("id2", "payment-flow", []string{"billing"}, "JWT for payments.", now.Add(-1*time.Hour)),
 	}
-	setupProjectWithSessions(t, sessions)
+	setupProjectWithPlans(t, plans)
 
 	out := captureOutput(t, func() {
 		if err := runSearch("jwt", "auth"); err != nil {
@@ -195,8 +196,8 @@ func TestSearch_TagFilter_NarrowsResults(t *testing.T) {
 }
 
 func TestSearch_TagFilter_NoKeywordMatchAfterTagFilter(t *testing.T) {
-	s := makeSearchSession("id1", "auth-service", []string{"auth"}, "OAuth2 flow.", time.Now())
-	setupProjectWithSessions(t, []session.Session{s})
+	s := makeSearchPlan("id1", "auth-service", []string{"auth"}, "OAuth2 flow.", time.Now())
+	setupProjectWithPlans(t, []plan.Plan{s})
 
 	out := captureOutput(t, func() {
 		if err := runSearch("kubernetes", "auth"); err != nil {
@@ -204,14 +205,14 @@ func TestSearch_TagFilter_NoKeywordMatchAfterTagFilter(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(out, "No sessions found") {
-		t.Errorf("expected 'No sessions found' when keyword has no match after tag filter, got: %q", out)
+	if !strings.Contains(out, "No plans found") {
+		t.Errorf("expected 'No plans found' when keyword has no match after tag filter, got: %q", out)
 	}
 }
 
 func TestSearch_TagFilter_AllSessionsExcluded(t *testing.T) {
-	s := makeSearchSession("id1", "auth-service", []string{"auth"}, "Summary.", time.Now())
-	setupProjectWithSessions(t, []session.Session{s})
+	s := makeSearchPlan("id1", "auth-service", []string{"auth"}, "Summary.", time.Now())
+	setupProjectWithPlans(t, []plan.Plan{s})
 
 	out := captureOutput(t, func() {
 		if err := runSearch("auth", "unrelated-tag"); err != nil {
@@ -219,8 +220,8 @@ func TestSearch_TagFilter_AllSessionsExcluded(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(out, "No sessions found") {
-		t.Errorf("expected 'No sessions found' when tag filter matches nothing, got: %q", out)
+	if !strings.Contains(out, "No plans found") {
+		t.Errorf("expected 'No plans found' when tag filter matches nothing, got: %q", out)
 	}
 }
 
@@ -228,12 +229,12 @@ func TestSearch_TagFilter_AllSessionsExcluded(t *testing.T) {
 
 func TestSearch_MultipleMatches_AllReturned(t *testing.T) {
 	now := time.Now()
-	sessions := []session.Session{
-		makeSearchSession("id1", "auth-login", []string{"auth"}, "Login flow.", now.Add(-2*time.Hour)),
-		makeSearchSession("id2", "auth-signup", []string{"auth"}, "Signup flow.", now.Add(-1*time.Hour)),
-		makeSearchSession("id3", "cache-layer", []string{"redis"}, "Caching.", now),
+	plans := []plan.Plan{
+		makeSearchPlan("id1", "auth-login", []string{"auth"}, "Login flow.", now.Add(-2*time.Hour)),
+		makeSearchPlan("id2", "auth-signup", []string{"auth"}, "Signup flow.", now.Add(-1*time.Hour)),
+		makeSearchPlan("id3", "cache-layer", []string{"redis"}, "Caching.", now),
 	}
-	setupProjectWithSessions(t, sessions)
+	setupProjectWithPlans(t, plans)
 
 	out := captureOutput(t, func() {
 		if err := runSearch("auth", ""); err != nil {
@@ -255,8 +256,8 @@ func TestSearch_MultipleMatches_AllReturned(t *testing.T) {
 // --- runSearch: table output format ------------------------------------------
 
 func TestSearch_Output_ContainsHeaders(t *testing.T) {
-	s := makeSearchSession("id1", "api-gateway", []string{"api"}, "Gateway design.", time.Now())
-	setupProjectWithSessions(t, []session.Session{s})
+	s := makeSearchPlan("id1", "api-gateway", []string{"api"}, "Gateway design.", time.Now())
+	setupProjectWithPlans(t, []plan.Plan{s})
 
 	out := captureOutput(t, func() {
 		if err := runSearch("api", ""); err != nil {
@@ -278,11 +279,11 @@ func TestSearch_Output_ContainsHeaders(t *testing.T) {
 func TestSearch_Output_SortedNewestFirst(t *testing.T) {
 	older := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	newer := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
-	sessions := []session.Session{
-		makeSearchSession("id1", "old-session", []string{"go"}, "Old stuff.", older),
-		makeSearchSession("id2", "new-session", []string{"go"}, "New stuff.", newer),
+	plans := []plan.Plan{
+		makeSearchPlan("id1", "old-session", []string{"go"}, "Old stuff.", older),
+		makeSearchPlan("id2", "new-session", []string{"go"}, "New stuff.", newer),
 	}
-	setupProjectWithSessions(t, sessions)
+	setupProjectWithPlans(t, plans)
 
 	out := captureOutput(t, func() {
 		if err := runSearch("go", ""); err != nil {

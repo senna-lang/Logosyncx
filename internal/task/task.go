@@ -1,6 +1,6 @@
 // Package task provides types and functions for reading, writing, and
 // parsing Logosyncx task files — Markdown documents with YAML frontmatter
-// stored under .logosyncx/tasks/.
+// stored under .logosyncx/tasks/<plan-slug>/.
 package task
 
 import (
@@ -16,7 +16,6 @@ import (
 )
 
 const (
-	tasksDirName    = "tasks"
 	excerptMaxRunes = 300
 	frontmatterSep  = "---"
 )
@@ -31,7 +30,6 @@ const (
 	StatusOpen       Status = "open"
 	StatusInProgress Status = "in_progress"
 	StatusDone       Status = "done"
-	StatusCancelled  Status = "cancelled"
 )
 
 const (
@@ -41,80 +39,77 @@ const (
 )
 
 // ValidStatuses lists every recognised Status value.
-var ValidStatuses = []Status{StatusOpen, StatusInProgress, StatusDone, StatusCancelled}
+var ValidStatuses = []Status{StatusOpen, StatusInProgress, StatusDone}
 
 // ValidPriorities lists every recognised Priority value.
 var ValidPriorities = []Priority{PriorityHigh, PriorityMedium, PriorityLow}
 
-// Task represents a single task file stored in .logosyncx/tasks/.
+// Task represents a single task file stored under .logosyncx/tasks/<plan-slug>/.
 type Task struct {
 	// Frontmatter fields (serialised to/from YAML).
 	ID          string     `yaml:"id"`
 	Date        time.Time  `yaml:"date"`
 	Title       string     `yaml:"title"`
+	Seq         int        `yaml:"seq"`
 	Status      Status     `yaml:"status"`
 	Priority    Priority   `yaml:"priority"`
-	Session     string     `yaml:"session"`            // primary linked session filename (kept for backward compat)
-	Sessions    []string   `yaml:"sessions,omitempty"` // task→session links (list of session filenames)
-	Related     []string   `yaml:"related,omitempty"`  // task→task links (list of task filenames)
+	Plan        string     `yaml:"plan"`
+	DependsOn   []int      `yaml:"depends_on,omitempty"`
 	Tags        []string   `yaml:"tags"`
 	Assignee    string     `yaml:"assignee"`
-	CompletedAt *time.Time `yaml:"completed_at,omitempty"` // set when status transitions to done or cancelled
+	CompletedAt *time.Time `yaml:"completed_at,omitempty"`
 
 	// Derived fields — not written to frontmatter.
-	Filename string `yaml:"-"`
-	Excerpt  string `yaml:"-"` // first excerptMaxRunes runes of ## What section
-	Body     string `yaml:"-"` // full markdown body (everything after frontmatter)
+	DirPath string `yaml:"-"` // absolute path to the task's directory (set by store)
+	Excerpt string `yaml:"-"` // first excerptMaxRunes runes of the excerpt section
+	Body    string `yaml:"-"` // full markdown body (everything after frontmatter)
 }
 
-// TaskJSON is the shape used for --json output.  It includes all frontmatter
-// fields plus the derived Filename and Excerpt.
+// TaskJSON is the shape used for --json output and the task-index.jsonl.
+// It includes all frontmatter fields plus the derived DirPath, Blocked, and Excerpt.
 type TaskJSON struct {
 	ID          string     `json:"id"`
-	Filename    string     `json:"filename"`
+	DirPath     string     `json:"dir_path"`
 	Date        time.Time  `json:"date"`
 	Title       string     `json:"title"`
+	Seq         int        `json:"seq"`
 	Status      Status     `json:"status"`
 	Priority    Priority   `json:"priority"`
-	Session     string     `json:"session"`
-	Sessions    []string   `json:"sessions"`
-	Related     []string   `json:"related"`
+	Plan        string     `json:"plan"`
+	DependsOn   []int      `json:"depends_on"`
 	Tags        []string   `json:"tags"`
 	Assignee    string     `json:"assignee"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	Blocked     bool       `json:"blocked"`
 	Excerpt     string     `json:"excerpt"`
 }
 
 // ToJSON converts a Task to its JSON-output representation.
 // Nil slice fields are normalised to empty slices.
 func (t *Task) ToJSON() TaskJSON {
-	tags := t.Tags
-	if tags == nil {
-		tags = []string{}
-	}
-	sessions := t.Sessions
-	if sessions == nil {
-		sessions = []string{}
-	}
-	related := t.Related
-	if related == nil {
-		related = []string{}
-	}
 	return TaskJSON{
 		ID:          t.ID,
-		Filename:    t.Filename,
+		DirPath:     t.DirPath,
 		Date:        t.Date,
 		Title:       t.Title,
+		Seq:         t.Seq,
 		Status:      t.Status,
 		Priority:    t.Priority,
-		Session:     t.Session,
-		Sessions:    sessions,
-		Related:     related,
-		Tags:        tags,
+		Plan:        t.Plan,
+		DependsOn:   normalizeInts(t.DependsOn),
+		Tags:        normalizeStrings(t.Tags),
 		Assignee:    t.Assignee,
 		CompletedAt: t.CompletedAt,
+		Blocked:     false, // store sets this during loadAll
 		Excerpt:     t.Excerpt,
 	}
+}
+
+// FromTask converts a *Task to TaskJSON (package-level function form of ToJSON).
+// Nil slices are normalised to empty slices. Blocked is always false here;
+// the store sets it during loadAll after evaluating depends_on.
+func FromTask(t *Task) TaskJSON {
+	return t.ToJSON()
 }
 
 // IsValidStatus reports whether s is a recognised Status constant.
@@ -125,6 +120,12 @@ func IsValidStatus(s Status) bool {
 // IsValidPriority reports whether p is a recognised Priority constant.
 func IsValidPriority(p Priority) bool {
 	return slices.Contains(ValidPriorities, p)
+}
+
+// TaskDirName returns the directory name for a task given its seq number and
+// title: e.g. seq=1, title="Add JWT middleware" → "001-add-jwt-middleware".
+func TaskDirName(seq int, title string) string {
+	return fmt.Sprintf("%03d-%s", seq, slugify(title))
 }
 
 // ParseOptions controls optional behaviour of Parse.
@@ -156,7 +157,6 @@ func ParseWithOptions(filename string, data []byte, opts ParseOptions) (Task, er
 		return Task{}, fmt.Errorf("parse frontmatter in %s: %w", filename, err)
 	}
 
-	t.Filename = filename
 	t.Body = string(body)
 	t.Excerpt = extractExcerpt(body, opts.ExcerptSection)
 
@@ -186,6 +186,7 @@ func Marshal(t Task) ([]byte, error) {
 
 // FileName returns the canonical filename for a task: <date>_<slug>.md
 // The slug is the task title converted to lower-case kebab-case.
+// NOTE: The flat TASK.md layout is planned for Task 005 (store rewrite).
 func FileName(t Task) string {
 	date := t.Date.Format("2006-01-02")
 	slug := slugify(t.Title)
@@ -196,20 +197,24 @@ func FileName(t Task) string {
 }
 
 // slugify converts a string to a lower-case kebab-case filename segment.
-// Spaces become hyphens; characters that are not alphanumeric, hyphens, or
-// underscores are removed.
+// Consecutive hyphens are collapsed; leading/trailing hyphens are removed.
 func slugify(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	var b strings.Builder
+	prevHyphen := false
 	for _, r := range s {
 		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_':
 			b.WriteRune(r)
-		case r == ' ':
-			b.WriteRune('-')
+			prevHyphen = false
+		case r == '-', r == ' ':
+			if !prevHyphen {
+				b.WriteRune('-')
+				prevHyphen = true
+			}
 		}
 	}
-	return b.String()
+	return strings.Trim(b.String(), "-")
 }
 
 // ExtractSections returns only the markdown sections whose headings match
@@ -249,6 +254,22 @@ func ExtractSections(body string, sectionNames []string) string {
 }
 
 // --- helpers -----------------------------------------------------------------
+
+// normalizeInts returns a non-nil empty slice when s is nil.
+func normalizeInts(s []int) []int {
+	if s == nil {
+		return []int{}
+	}
+	return s
+}
+
+// normalizeStrings returns a non-nil empty slice when s is nil.
+func normalizeStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
 
 // splitFrontmatter separates YAML frontmatter from the markdown body.
 // The file must begin with "---\n"; the closing "---" ends the frontmatter block.

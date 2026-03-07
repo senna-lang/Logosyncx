@@ -8,20 +8,20 @@ import (
 
 	"github.com/senna-lang/logosyncx/internal/project"
 	"github.com/senna-lang/logosyncx/pkg/config"
-	"github.com/senna-lang/logosyncx/pkg/session"
+	"github.com/senna-lang/logosyncx/pkg/plan"
 	"github.com/spf13/cobra"
 )
 
 var referCmd = &cobra.Command{
 	Use:   "refer",
-	Short: "Print the content of a saved session",
-	Long: `Find a session by name (exact or partial match against filename and topic)
+	Short: "Print the content of a saved plan",
+	Long: `Find a plan by name (exact or partial match against filename and topic)
 and print its full content to stdout.
 
 Use --summary to return only the sections listed in config's summary_sections,
 saving tokens when the command is used by agents.
 
-If multiple sessions match the given name, a candidate list is printed and
+If multiple plans match the given name, a candidate list is printed and
 the command exits with an error so the caller knows to narrow the search.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -32,7 +32,7 @@ the command exits with an error so the caller knows to narrow the search.`,
 }
 
 func init() {
-	referCmd.Flags().StringP("name", "n", "", "Session name to look up (exact or partial match against filename, topic, or ID)")
+	referCmd.Flags().StringP("name", "n", "", "Plan name to look up (exact or partial match against filename, topic, or ID)")
 	_ = referCmd.MarkFlagRequired("name")
 	referCmd.Flags().Bool("summary", false, "Return only summary_sections from config (saves tokens)")
 	rootCmd.AddCommand(referCmd)
@@ -45,48 +45,48 @@ func runRefer(name string, summaryOnly bool) error {
 		return err
 	}
 
-	sessions, err := session.LoadAll(root)
+	plans, err := plan.LoadAll(root)
 	if err != nil {
 		// Non-fatal parse errors: warn but continue with what we have.
 		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 	}
 
-	matches := matchSessions(sessions, name)
+	matches := matchPlans(plans, name)
 
 	switch len(matches) {
 	case 0:
-		return fmt.Errorf("no session found matching %q", name)
+		return fmt.Errorf("no plan found matching %q", name)
 	case 1:
 		return printRefer(matches[0], summaryOnly, root)
 	default:
-		return printCandidates(matches, name)
+		return printPlanCandidates(matches, name)
 	}
 }
 
-// matchSessions returns all sessions whose filename stem, topic, or ID
-// contains name (case-insensitive). A single exact match — on any of those
-// three fields — is returned alone, bypassing any partial matches.
-func matchSessions(sessions []session.Session, name string) []session.Session {
+// matchPlans returns all plans whose filename stem, topic, or ID contains name
+// (case-insensitive). A single exact match on any of those three fields is
+// returned alone, bypassing any partial matches.
+func matchPlans(plans []plan.Plan, name string) []plan.Plan {
 	lower := strings.ToLower(name)
 
-	var exact, partial []session.Session
+	var exact, partial []plan.Plan
 
-	for _, s := range sessions {
-		stem := strings.TrimSuffix(s.Filename, ".md")
+	for _, p := range plans {
+		stem := strings.TrimSuffix(p.Filename, ".md")
 
 		// Exact match (case-insensitive) on stem, topic, or ID.
 		if strings.EqualFold(stem, name) ||
-			strings.EqualFold(s.Topic, name) ||
-			strings.EqualFold(s.ID, name) {
-			exact = append(exact, s)
+			strings.EqualFold(p.Topic, name) ||
+			strings.EqualFold(p.ID, name) {
+			exact = append(exact, p)
 			continue
 		}
 
 		// Partial / substring match.
 		if strings.Contains(strings.ToLower(stem), lower) ||
-			strings.Contains(strings.ToLower(s.Topic), lower) ||
-			strings.Contains(strings.ToLower(s.ID), lower) {
-			partial = append(partial, s)
+			strings.Contains(strings.ToLower(p.Topic), lower) ||
+			strings.Contains(strings.ToLower(p.ID), lower) {
+			partial = append(partial, p)
 		}
 	}
 
@@ -98,38 +98,41 @@ func matchSessions(sessions []session.Session, name string) []session.Session {
 	return append(exact, partial...)
 }
 
-// printRefer writes the session content to stdout.
+// printRefer writes the plan content to stdout.
 // With summaryOnly=true, only the sections listed in config's summary_sections
-// are printed; otherwise the full session (frontmatter + body) is printed.
-func printRefer(s session.Session, summaryOnly bool, root string) error {
+// are printed; otherwise the full plan (frontmatter + body) is printed.
+func printRefer(p plan.Plan, summaryOnly bool, root string) error {
 	if summaryOnly {
 		cfg, err := config.Load(root)
 		if err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}
-		out := session.ExtractSections(s.Body, cfg.Sessions.SummarySections)
+		out := plan.ExtractSections(p.Body, cfg.Plans.SummarySections)
 		if out == "" {
-			fmt.Fprintln(os.Stderr, "warning: no matching summary sections found in this session")
+			fmt.Fprintln(os.Stderr, "warning: no matching summary sections found in this plan")
 		}
 		fmt.Println(out)
 		return nil
 	}
 
-	data, err := session.Marshal(s)
+	data, err := plan.Marshal(p)
 	if err != nil {
-		return fmt.Errorf("marshal session: %w", err)
+		return fmt.Errorf("marshal plan: %w", err)
+	}
+	if p.Body != "" {
+		data = append(data, []byte(p.Body)...)
 	}
 	_, err = fmt.Print(string(data))
 	return err
 }
 
-// printCandidates writes a numbered list of matching sessions to stderr and
+// printPlanCandidates writes a numbered list of matching plans to stderr and
 // returns an error telling the caller to narrow the search.
-func printCandidates(sessions []session.Session, name string) error {
-	fmt.Fprintf(os.Stderr, "Multiple sessions match %q:\n\n", name)
-	for i, s := range sessions {
-		fmt.Fprintf(os.Stderr, "  %d. %s  (topic: %s)\n", i+1, s.Filename, s.Topic)
+func printPlanCandidates(plans []plan.Plan, name string) error {
+	fmt.Fprintf(os.Stderr, "Multiple plans match %q:\n\n", name)
+	for i, p := range plans {
+		fmt.Fprintf(os.Stderr, "  %d. %s  (topic: %s)\n", i+1, p.Filename, p.Topic)
 	}
 	fmt.Fprintln(os.Stderr)
-	return fmt.Errorf("use a more specific name to select one session")
+	return fmt.Errorf("use a more specific name to select one plan")
 }

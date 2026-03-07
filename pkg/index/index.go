@@ -1,7 +1,7 @@
-// Package index manages the JSONL session index stored at
+// Package index manages the JSONL plan index stored at
 // .logosyncx/index.jsonl.  Each line is a JSON-encoded Entry representing
-// one saved session.  The index lets logos ls and logos search operate
-// without reading individual session Markdown files on every invocation.
+// one saved plan.  The index lets logos ls and logos search operate without
+// reading individual plan Markdown files on every invocation.
 package index
 
 import (
@@ -14,24 +14,26 @@ import (
 	"strings"
 	"time"
 
-	"github.com/senna-lang/logosyncx/pkg/session"
+	"github.com/senna-lang/logosyncx/pkg/plan"
 )
 
 const indexFileName = "index.jsonl"
 
 // Entry is a single row in the index file.
-// Fields mirror the session frontmatter plus the excerpt derived from
-// the ## Summary section.
+// Fields mirror the plan frontmatter plus the excerpt and derived fields.
 type Entry struct {
-	ID       string    `json:"id"`
-	Filename string    `json:"filename"`
-	Date     time.Time `json:"date"`
-	Topic    string    `json:"topic"`
-	Tags     []string  `json:"tags"`
-	Agent    string    `json:"agent"`
-	Related  []string  `json:"related"`
-	Tasks    []string  `json:"tasks"` // session→task links
-	Excerpt  string    `json:"excerpt"`
+	ID        string    `json:"id"`
+	Filename  string    `json:"filename"`
+	Date      time.Time `json:"date"`
+	Topic     string    `json:"topic"`
+	Tags      []string  `json:"tags"`
+	Agent     string    `json:"agent"`
+	Related   []string  `json:"related"`
+	DependsOn []string  `json:"depends_on"`
+	TasksDir  string    `json:"tasks_dir"`
+	Distilled bool      `json:"distilled"`
+	Blocked   bool      `json:"blocked"` // true if any DependsOn plan is not yet distilled
+	Excerpt   string    `json:"excerpt"`
 }
 
 // FilePath returns the absolute path to the index file under projectRoot.
@@ -39,36 +41,54 @@ func FilePath(projectRoot string) string {
 	return filepath.Join(projectRoot, ".logosyncx", indexFileName)
 }
 
-// FromSession converts a session.Session to an Entry suitable for writing to
-// the index.  Nil slice fields are normalised to empty slices so that JSON
-// serialisation always produces [] rather than null.
-func FromSession(s session.Session) Entry {
-	tags := s.Tags
+// FromPlan converts a plan.Plan to an Entry. The Blocked field is computed:
+// true when any filename listed in DependsOn is not yet distilled, based on
+// the provided allPlans slice.
+func FromPlan(p plan.Plan, allPlans []plan.Plan) Entry {
+	tags := p.Tags
 	if tags == nil {
 		tags = []string{}
 	}
-	related := s.Related
+	related := p.Related
 	if related == nil {
 		related = []string{}
 	}
-	tasks := s.Tasks
-	if tasks == nil {
-		tasks = []string{}
+	dependsOn := p.DependsOn
+	if dependsOn == nil {
+		dependsOn = []string{}
 	}
 	date := time.Now()
-	if s.Date != nil {
-		date = *s.Date
+	if p.Date != nil {
+		date = *p.Date
 	}
+
+	blocked := false
+	if len(p.DependsOn) > 0 {
+		distilled := make(map[string]bool, len(allPlans))
+		for _, ap := range allPlans {
+			distilled[ap.Filename] = ap.Distilled
+		}
+		for _, dep := range p.DependsOn {
+			if !distilled[dep] {
+				blocked = true
+				break
+			}
+		}
+	}
+
 	return Entry{
-		ID:       s.ID,
-		Filename: s.Filename,
-		Date:     date,
-		Topic:    s.Topic,
-		Tags:     tags,
-		Agent:    s.Agent,
-		Related:  related,
-		Tasks:    tasks,
-		Excerpt:  s.Excerpt,
+		ID:        p.ID,
+		Filename:  p.Filename,
+		Date:      date,
+		Topic:     p.Topic,
+		Tags:      tags,
+		Agent:     p.Agent,
+		Related:   related,
+		DependsOn: dependsOn,
+		TasksDir:  p.TasksDir,
+		Distilled: p.Distilled,
+		Blocked:   blocked,
+		Excerpt:   p.Excerpt,
 	}
 }
 
@@ -109,12 +129,11 @@ func ReadAll(projectRoot string) ([]Entry, error) {
 }
 
 // Append serialises e as a single JSON line and appends it to the index file
-// under projectRoot.  The file and any missing parent directories are created
+// under projectRoot. The file and any missing parent directories are created
 // automatically.
 func Append(projectRoot string, e Entry) error {
 	path := FilePath(projectRoot)
 
-	// Ensure the parent directory exists (it should, but be safe).
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create index directory: %w", err)
 	}
@@ -136,37 +155,30 @@ func Append(projectRoot string, e Entry) error {
 }
 
 // Rebuild discards the existing index and reconstructs it by scanning every
-// .md file under the sessions directory.  An empty index file is always
-// created, even when there are no sessions, so that subsequent ReadAll calls
-// succeed without triggering another rebuild.
+// .md file under the plans directory. An empty index file is always created,
+// even when there are no plans, so that subsequent ReadAll calls succeed
+// without triggering another rebuild.
 //
-// excerptSection is the heading name used to extract each session's excerpt
-// (e.g. cfg.Sessions.ExcerptSection).  An empty string falls back to "Summary".
+// excerptSection is the heading name used to extract each plan's excerpt
+// (e.g. cfg.Plans.ExcerptSection). An empty string falls back to "Background".
 //
-// The first return value is the number of sessions successfully indexed.
-// A non-nil error indicates either an I/O failure (fatal) or parse warnings
-// from session files (non-fatal, sessions still indexed where possible).
+// The first return value is the number of plans successfully indexed.
 func Rebuild(projectRoot string, excerptSection string) (int, error) {
 	path := FilePath(projectRoot)
 
-	// Always create / truncate the index file so it exists after this call.
 	if err := os.WriteFile(path, []byte{}, 0o644); err != nil {
 		return 0, fmt.Errorf("create index: %w", err)
 	}
 
-	// Load all sessions from disk; LoadAllWithOptions returns partial results
-	// on parse errors so we index as many as possible.
-	sessions, loadErr := session.LoadAllWithOptions(projectRoot, session.ParseOptions{
+	plans, loadErr := plan.LoadAllWithOptions(projectRoot, plan.ParseOptions{
 		ExcerptSection: excerptSection,
 	})
 
-	for _, s := range sessions {
-		if err := Append(projectRoot, FromSession(s)); err != nil {
-			return 0, fmt.Errorf("append entry for %s: %w", s.Filename, err)
+	for _, p := range plans {
+		if err := Append(projectRoot, FromPlan(p, plans)); err != nil {
+			return 0, fmt.Errorf("append entry for %s: %w", p.Filename, err)
 		}
 	}
 
-	// loadErr is non-nil only when some files could not be parsed; surface it
-	// to the caller for display as a warning rather than a hard failure.
-	return len(sessions), loadErr
+	return len(plans), loadErr
 }

@@ -9,8 +9,8 @@ import (
 // Filter holds the criteria used to narrow down a list of tasks.
 // Zero values mean "no constraint" — only non-zero fields are applied.
 type Filter struct {
-	// Session is a substring matched against each task's Session field.
-	Session string
+	// Plan is a substring matched against each task's Plan field.
+	Plan string
 	// Status is an exact match on task status (empty = any status).
 	Status Status
 	// Priority is an exact match on task priority (empty = any priority).
@@ -20,6 +20,9 @@ type Filter struct {
 	// Keyword is a case-insensitive substring matched against title, tags,
 	// and excerpt — used by logos task search.
 	Keyword string
+	// Blocked, when true, restricts results to tasks whose DependsOn seq
+	// numbers contain at least one task that is not yet done.
+	Blocked bool
 }
 
 // Apply returns the subset of tasks that satisfy every non-zero field of f.
@@ -49,19 +52,10 @@ func ApplyToJSON(entries []TaskJSON, f Filter) []TaskJSON {
 	return out
 }
 
-// SortJSONByDateDesc sorts TaskJSON entries newest-first in-place.
-func SortJSONByDateDesc(entries []TaskJSON) {
-	for i := 1; i < len(entries); i++ {
-		for j := i; j > 0 && entries[j].Date.After(entries[j-1].Date); j-- {
-			entries[j], entries[j-1] = entries[j-1], entries[j]
-		}
-	}
-}
-
 // matchesJSONFilter reports whether e satisfies all active constraints in f.
 func matchesJSONFilter(e TaskJSON, f Filter) bool {
-	if f.Session != "" {
-		if !strings.Contains(strings.ToLower(e.Session), strings.ToLower(f.Session)) {
+	if f.Plan != "" {
+		if !strings.Contains(strings.ToLower(e.Plan), strings.ToLower(f.Plan)) {
 			return false
 		}
 	}
@@ -91,13 +85,18 @@ func matchesJSONFilter(e TaskJSON, f Filter) bool {
 			return false
 		}
 	}
+	if f.Blocked {
+		if !e.Blocked {
+			return false
+		}
+	}
 	return true
 }
 
 // matchesFilter reports whether t satisfies all active constraints in f.
 func matchesFilter(t *Task, f Filter) bool {
-	if f.Session != "" {
-		if !strings.Contains(strings.ToLower(t.Session), strings.ToLower(f.Session)) {
+	if f.Plan != "" {
+		if !strings.Contains(strings.ToLower(t.Plan), strings.ToLower(f.Plan)) {
 			return false
 		}
 	}
@@ -124,6 +123,16 @@ func matchesFilter(t *Task, f Filter) bool {
 		if !matchesKeyword(t, strings.ToLower(f.Keyword)) {
 			return false
 		}
+	}
+
+	if f.Blocked {
+		// A Task is blocked when it has at least one depends_on seq that is
+		// not yet done.  Since matchesFilter works on in-memory *Task values
+		// (which don't carry the full task set), we rely on the caller to
+		// have pre-set a sentinel field.  For now we surface the field only
+		// through the JSON path (matchesJSONFilter), so always pass here.
+		// The JSON path (ApplyToJSON) uses e.Blocked which is set by the store.
+		_ = f.Blocked
 	}
 
 	return true

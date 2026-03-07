@@ -65,7 +65,6 @@ func ReadAllTaskIndex(projectRoot string) ([]TaskJSON, error) {
 func AppendTaskIndex(projectRoot string, e TaskJSON) error {
 	path := TaskIndexFilePath(projectRoot)
 
-	// Ensure the parent directory exists (it should, but be safe).
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create task index directory: %w", err)
 	}
@@ -86,33 +85,11 @@ func AppendTaskIndex(projectRoot string, e TaskJSON) error {
 	return nil
 }
 
-// RebuildTaskIndex discards the existing task index and reconstructs it by
-// scanning every .md file under .logosyncx/tasks/.  An empty index file is
-// always created, even when there are no tasks, so that subsequent
-// ReadAllTaskIndex calls succeed without triggering another rebuild.
-//
-// The first return value is the number of tasks successfully indexed.
-// A non-nil error indicates either an I/O failure (fatal) or parse warnings
-// from task files (non-fatal; tasks are still indexed where possible).
-func (s *Store) RebuildTaskIndex() (int, error) {
-	path := TaskIndexFilePath(s.projectRoot)
-
-	// Always create / truncate the index file so it exists after this call.
-	if err := os.WriteFile(path, []byte{}, 0o644); err != nil {
-		return 0, fmt.Errorf("create task index: %w", err)
-	}
-
-	// Load all tasks from disk; loadAll returns partial results on parse
-	// errors so we index as many as possible.
-	tasks, loadErr := s.loadAll()
-
-	for _, t := range tasks {
-		if err := AppendTaskIndex(s.projectRoot, t.ToJSON()); err != nil {
-			return 0, fmt.Errorf("append task index entry for %s: %w", t.Filename, err)
+// SortJSONByDateDesc sorts TaskJSON entries newest-first in-place.
+func SortJSONByDateDesc(entries []TaskJSON) {
+	for i := 1; i < len(entries); i++ {
+		for j := i; j > 0 && entries[j].Date.After(entries[j-1].Date); j-- {
+			entries[j], entries[j-1] = entries[j-1], entries[j]
 		}
 	}
-
-	// loadErr is non-nil only when some files could not be parsed; surface it
-	// to the caller for display as a warning rather than a hard failure.
-	return len(tasks), loadErr
 }

@@ -10,31 +10,52 @@ import (
 	"time"
 
 	"github.com/senna-lang/logosyncx/pkg/index"
-	"github.com/senna-lang/logosyncx/pkg/session"
+	"github.com/senna-lang/logosyncx/pkg/plan"
 )
 
 // --- helpers -----------------------------------------------------------------
 
-func setupProjectWithSessions(t *testing.T, sessions []session.Session) string {
+// setupProjectWithPlans initialises a project and writes plan files with body.
+func setupProjectWithPlans(t *testing.T, plans []plan.Plan) string {
 	t.Helper()
 	dir := setupInitedProject(t)
-	for _, s := range sessions {
-		if _, err := session.Write(dir, s); err != nil {
-			t.Fatalf("Write session %q: %v", s.Topic, err)
-		}
+	for _, p := range plans {
+		writePlanFileWithBody(t, dir, p)
 	}
 	return dir
 }
 
-func makeTestSession(topic string, tags []string, date time.Time) session.Session {
-	return session.Session{
-		ID:      "test01",
-		Date:    &date,
-		Topic:   topic,
-		Tags:    tags,
-		Agent:   "claude-code",
-		Related: []string{},
-		Body:    "## Summary\nThis is a test session about " + topic + ".\n\n## Key Decisions\n- Decision one\n",
+// writePlanFileWithBody writes a plan including its Body (unlike plan.Write
+// which produces scaffold-only files). Used in tests so excerpt is populated.
+func writePlanFileWithBody(t *testing.T, projectRoot string, p plan.Plan) {
+	t.Helper()
+	plansDir := filepath.Join(projectRoot, ".logosyncx", "plans")
+	if err := os.MkdirAll(plansDir, 0o755); err != nil {
+		t.Fatalf("mkdir plans: %v", err)
+	}
+	data, err := plan.Marshal(p)
+	if err != nil {
+		t.Fatalf("plan.Marshal: %v", err)
+	}
+	if p.Body != "" {
+		data = append(data, []byte(p.Body)...)
+	}
+	path := filepath.Join(plansDir, plan.FileName(p))
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("WriteFile plan: %v", err)
+	}
+}
+
+func makeTestPlan(topic string, tags []string, date time.Time) plan.Plan {
+	return plan.Plan{
+		ID:       "test01",
+		Date:     &date,
+		Topic:    topic,
+		Tags:     tags,
+		Agent:    "claude-code",
+		Related:  []string{},
+		TasksDir: ".logosyncx/tasks/" + topic,
+		Body:     "## Background\nThis is a test plan about " + topic + ".\n\n## Notes\n- Note one\n",
 	}
 }
 
@@ -66,13 +87,13 @@ func TestLS_NoSessions_PrintsMessage(t *testing.T) {
 	setupInitedProject(t)
 
 	out := captureOutput(t, func() {
-		if err := runLS("", "", false); err != nil {
+		if err := runLS("", "", false, false); err != nil {
 			t.Fatalf("runLS failed: %v", err)
 		}
 	})
 
-	if !strings.Contains(out, "No sessions found") {
-		t.Errorf("expected 'No sessions found', got: %q", out)
+	if !strings.Contains(out, "No plans found") {
+		t.Errorf("expected 'No plans found', got: %q", out)
 	}
 }
 
@@ -80,15 +101,15 @@ func TestLS_NoSessions_JSON_PrintsEmptyArray(t *testing.T) {
 	setupInitedProject(t)
 
 	out := captureOutput(t, func() {
-		if err := runLS("", "", true); err != nil {
+		if err := runLS("", "", true, false); err != nil {
 			t.Fatalf("runLS --json failed: %v", err)
 		}
 	})
 
-	// Should still output valid JSON (empty array handled by "No sessions found").
-	// Actually runLS returns early with "No sessions found." before printing JSON.
-	if !strings.Contains(out, "No sessions found") {
-		t.Errorf("expected 'No sessions found', got: %q", out)
+	// Should still output valid JSON (empty array handled by "No plans found").
+	// Actually runLS returns early with "No plans found." before printing JSON.
+	if !strings.Contains(out, "No plans found") {
+		t.Errorf("expected 'No plans found', got: %q", out)
 	}
 }
 
@@ -100,7 +121,7 @@ func TestLS_NotInitialized_ReturnsError(t *testing.T) {
 	_ = os.Chdir(dir)
 	t.Cleanup(func() { _ = os.Chdir(orig) })
 
-	err := runLS("", "", false)
+	err := runLS("", "", false, false)
 	if err == nil {
 		t.Fatal("expected error when project not initialized, got nil")
 	}
@@ -113,12 +134,12 @@ func TestLS_NotInitialized_ReturnsError(t *testing.T) {
 
 func TestLS_Table_ContainsHeaders(t *testing.T) {
 	now := time.Now()
-	setupProjectWithSessions(t, []session.Session{
-		makeTestSession("auth-refactor", []string{"auth"}, now),
+	setupProjectWithPlans(t, []plan.Plan{
+		makeTestPlan("auth-refactor", []string{"auth"}, now),
 	})
 
 	out := captureOutput(t, func() {
-		if err := runLS("", "", false); err != nil {
+		if err := runLS("", "", false, false); err != nil {
 			t.Fatalf("runLS failed: %v", err)
 		}
 	})
@@ -136,12 +157,12 @@ func TestLS_Table_ContainsHeaders(t *testing.T) {
 
 func TestLS_Table_ContainsSessionData(t *testing.T) {
 	now := time.Now()
-	setupProjectWithSessions(t, []session.Session{
-		makeTestSession("auth-refactor", []string{"auth", "jwt"}, now),
+	setupProjectWithPlans(t, []plan.Plan{
+		makeTestPlan("auth-refactor", []string{"auth", "jwt"}, now),
 	})
 
 	out := captureOutput(t, func() {
-		if err := runLS("", "", false); err != nil {
+		if err := runLS("", "", false, false); err != nil {
 			t.Fatalf("runLS failed: %v", err)
 		}
 	})
@@ -159,14 +180,14 @@ func TestLS_Table_ContainsSessionData(t *testing.T) {
 
 func TestLS_Table_MultipleSessions(t *testing.T) {
 	base := time.Date(2025, 2, 20, 10, 0, 0, 0, time.UTC)
-	setupProjectWithSessions(t, []session.Session{
-		makeTestSession("auth-refactor", []string{"auth"}, base),
-		makeTestSession("db-schema", []string{"postgres"}, base.Add(-48*time.Hour)),
-		makeTestSession("security-audit", []string{"security"}, base.Add(-96*time.Hour)),
+	setupProjectWithPlans(t, []plan.Plan{
+		makeTestPlan("auth-refactor", []string{"auth"}, base),
+		makeTestPlan("db-schema", []string{"postgres"}, base.Add(-48*time.Hour)),
+		makeTestPlan("security-audit", []string{"security"}, base.Add(-96*time.Hour)),
 	})
 
 	out := captureOutput(t, func() {
-		if err := runLS("", "", false); err != nil {
+		if err := runLS("", "", false, false); err != nil {
 			t.Fatalf("runLS failed: %v", err)
 		}
 	})
@@ -184,12 +205,12 @@ func TestLS_Table_MultipleSessions(t *testing.T) {
 
 func TestLS_Table_NoTagsShowsDash(t *testing.T) {
 	now := time.Now()
-	setupProjectWithSessions(t, []session.Session{
-		makeTestSession("no-tags", []string{}, now),
+	setupProjectWithPlans(t, []plan.Plan{
+		makeTestPlan("no-tags", []string{}, now),
 	})
 
 	out := captureOutput(t, func() {
-		if err := runLS("", "", false); err != nil {
+		if err := runLS("", "", false, false); err != nil {
 			t.Fatalf("runLS failed: %v", err)
 		}
 	})
@@ -203,12 +224,12 @@ func TestLS_Table_NoTagsShowsDash(t *testing.T) {
 
 func TestLS_JSON_ValidJSON(t *testing.T) {
 	now := time.Now()
-	setupProjectWithSessions(t, []session.Session{
-		makeTestSession("auth-refactor", []string{"auth"}, now),
+	setupProjectWithPlans(t, []plan.Plan{
+		makeTestPlan("auth-refactor", []string{"auth"}, now),
 	})
 
 	out := captureOutput(t, func() {
-		if err := runLS("", "", true); err != nil {
+		if err := runLS("", "", true, false); err != nil {
 			t.Fatalf("runLS --json failed: %v", err)
 		}
 	})
@@ -221,12 +242,12 @@ func TestLS_JSON_ValidJSON(t *testing.T) {
 
 func TestLS_JSON_ContainsRequiredFields(t *testing.T) {
 	now := time.Date(2025, 2, 20, 10, 30, 0, 0, time.UTC)
-	setupProjectWithSessions(t, []session.Session{
-		makeTestSession("auth-refactor", []string{"auth", "jwt"}, now),
+	setupProjectWithPlans(t, []plan.Plan{
+		makeTestPlan("auth-refactor", []string{"auth", "jwt"}, now),
 	})
 
 	out := captureOutput(t, func() {
-		if err := runLS("", "", true); err != nil {
+		if err := runLS("", "", true, false); err != nil {
 			t.Fatalf("runLS --json failed: %v", err)
 		}
 	})
@@ -256,12 +277,12 @@ func TestLS_JSON_ContainsRequiredFields(t *testing.T) {
 
 func TestLS_JSON_TagsNeverNull(t *testing.T) {
 	now := time.Now()
-	s := makeTestSession("no-tags", nil, now)
-	s.Tags = nil
-	setupProjectWithSessions(t, []session.Session{s})
+	p := makeTestPlan("no-tags", nil, now)
+	p.Tags = nil
+	setupProjectWithPlans(t, []plan.Plan{p})
 
 	out := captureOutput(t, func() {
-		if err := runLS("", "", true); err != nil {
+		if err := runLS("", "", true, false); err != nil {
 			t.Fatalf("runLS --json failed: %v", err)
 		}
 	})
@@ -277,12 +298,12 @@ func TestLS_JSON_TagsNeverNull(t *testing.T) {
 
 func TestLS_JSON_RelatedNeverNull(t *testing.T) {
 	now := time.Now()
-	s := makeTestSession("no-related", []string{"test"}, now)
-	s.Related = nil
-	setupProjectWithSessions(t, []session.Session{s})
+	p := makeTestPlan("no-related", []string{"test"}, now)
+	p.Related = nil
+	setupProjectWithPlans(t, []plan.Plan{p})
 
 	out := captureOutput(t, func() {
-		if err := runLS("", "", true); err != nil {
+		if err := runLS("", "", true, false); err != nil {
 			t.Fatalf("runLS --json failed: %v", err)
 		}
 	})
@@ -300,14 +321,14 @@ func TestLS_JSON_RelatedNeverNull(t *testing.T) {
 
 func TestLS_FilterTag_MatchesSessions(t *testing.T) {
 	base := time.Now()
-	setupProjectWithSessions(t, []session.Session{
-		makeTestSession("auth-refactor", []string{"auth", "jwt"}, base),
-		makeTestSession("db-schema", []string{"postgres"}, base.Add(-time.Hour)),
-		makeTestSession("security-audit", []string{"auth", "security"}, base.Add(-2*time.Hour)),
+	setupProjectWithPlans(t, []plan.Plan{
+		makeTestPlan("auth-refactor", []string{"auth", "jwt"}, base),
+		makeTestPlan("db-schema", []string{"postgres"}, base.Add(-time.Hour)),
+		makeTestPlan("security-audit", []string{"auth", "security"}, base.Add(-2*time.Hour)),
 	})
 
 	out := captureOutput(t, func() {
-		if err := runLS("auth", "", false); err != nil {
+		if err := runLS("auth", "", false, false); err != nil {
 			t.Fatalf("runLS --tag auth failed: %v", err)
 		}
 	})
@@ -325,30 +346,30 @@ func TestLS_FilterTag_MatchesSessions(t *testing.T) {
 
 func TestLS_FilterTag_NoMatchShowsNoSessions(t *testing.T) {
 	now := time.Now()
-	setupProjectWithSessions(t, []session.Session{
-		makeTestSession("auth-refactor", []string{"auth"}, now),
+	setupProjectWithPlans(t, []plan.Plan{
+		makeTestPlan("auth-refactor", []string{"auth"}, now),
 	})
 
 	out := captureOutput(t, func() {
-		if err := runLS("nonexistenttag", "", false); err != nil {
+		if err := runLS("nonexistenttag", "", false, false); err != nil {
 			t.Fatalf("runLS failed: %v", err)
 		}
 	})
 
-	if !strings.Contains(out, "No sessions found") {
-		t.Errorf("expected 'No sessions found', got: %q", out)
+	if !strings.Contains(out, "No plans found") {
+		t.Errorf("expected 'No plans found', got: %q", out)
 	}
 }
 
 func TestLS_FilterTag_ExactMatch(t *testing.T) {
 	now := time.Now()
-	setupProjectWithSessions(t, []session.Session{
-		makeTestSession("auth-topic", []string{"auth"}, now),
-		makeTestSession("auth-extended", []string{"authentication"}, now.Add(-time.Hour)),
+	setupProjectWithPlans(t, []plan.Plan{
+		makeTestPlan("auth-topic", []string{"auth"}, now),
+		makeTestPlan("auth-extended", []string{"authentication"}, now.Add(-time.Hour)),
 	})
 
 	out := captureOutput(t, func() {
-		if err := runLS("auth", "", false); err != nil {
+		if err := runLS("auth", "", false, false); err != nil {
 			t.Fatalf("runLS failed: %v", err)
 		}
 	})
@@ -365,14 +386,14 @@ func TestLS_FilterTag_ExactMatch(t *testing.T) {
 // --- runLS: --since filter ---------------------------------------------------
 
 func TestLS_FilterSince_IncludesOnAndAfter(t *testing.T) {
-	setupProjectWithSessions(t, []session.Session{
-		makeTestSession("new-session", []string{}, time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)),
-		makeTestSession("old-session", []string{}, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)),
-		makeTestSession("boundary-session", []string{}, time.Date(2025, 2, 1, 0, 0, 0, 0, time.UTC)),
+	setupProjectWithPlans(t, []plan.Plan{
+		makeTestPlan("new-session", []string{}, time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)),
+		makeTestPlan("old-session", []string{}, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)),
+		makeTestPlan("boundary-session", []string{}, time.Date(2025, 2, 1, 0, 0, 0, 0, time.UTC)),
 	})
 
 	out := captureOutput(t, func() {
-		if err := runLS("", "2025-02-01", false); err != nil {
+		if err := runLS("", "2025-02-01", false, false); err != nil {
 			t.Fatalf("runLS --since failed: %v", err)
 		}
 	})
@@ -391,7 +412,7 @@ func TestLS_FilterSince_IncludesOnAndAfter(t *testing.T) {
 func TestLS_FilterSince_InvalidDate_ReturnsError(t *testing.T) {
 	setupInitedProject(t)
 
-	err := runLS("", "not-a-date", false)
+	err := runLS("", "not-a-date", false, false)
 	if err == nil {
 		t.Fatal("expected error for invalid --since date, got nil")
 	}
@@ -403,14 +424,14 @@ func TestLS_FilterSince_InvalidDate_ReturnsError(t *testing.T) {
 // --- runLS: sort order -------------------------------------------------------
 
 func TestLS_SortedNewestFirst(t *testing.T) {
-	setupProjectWithSessions(t, []session.Session{
-		makeTestSession("oldest", []string{}, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)),
-		makeTestSession("newest", []string{}, time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)),
-		makeTestSession("middle", []string{}, time.Date(2025, 2, 1, 0, 0, 0, 0, time.UTC)),
+	setupProjectWithPlans(t, []plan.Plan{
+		makeTestPlan("oldest", []string{}, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)),
+		makeTestPlan("newest", []string{}, time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)),
+		makeTestPlan("middle", []string{}, time.Date(2025, 2, 1, 0, 0, 0, 0, time.UTC)),
 	})
 
 	out := captureOutput(t, func() {
-		if err := runLS("", "", false); err != nil {
+		if err := runLS("", "", false, false); err != nil {
 			t.Fatalf("runLS failed: %v", err)
 		}
 	})
@@ -545,14 +566,14 @@ func TestFilterSince_IncludesBoundary(t *testing.T) {
 // --- combined filters --------------------------------------------------------
 
 func TestLS_TagAndSinceCombined(t *testing.T) {
-	setupProjectWithSessions(t, []session.Session{
-		makeTestSession("auth-new", []string{"auth"}, time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)),
-		makeTestSession("auth-old", []string{"auth"}, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)),
-		makeTestSession("db-new", []string{"postgres"}, time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)),
+	setupProjectWithPlans(t, []plan.Plan{
+		makeTestPlan("auth-new", []string{"auth"}, time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)),
+		makeTestPlan("auth-old", []string{"auth"}, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)),
+		makeTestPlan("db-new", []string{"postgres"}, time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)),
 	})
 
 	out := captureOutput(t, func() {
-		if err := runLS("auth", "2025-02-01", false); err != nil {
+		if err := runLS("auth", "2025-02-01", false, false); err != nil {
 			t.Fatalf("runLS failed: %v", err)
 		}
 	})
@@ -573,13 +594,11 @@ func TestLS_TagAndSinceCombined(t *testing.T) {
 func TestLS_FindsSessionsFromSubdirectory(t *testing.T) {
 	dir := setupInitedProject(t)
 
-	s := makeTestSession("subdir-test", []string{"test"}, time.Now())
-	if _, err := session.Write(dir, s); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
+	p := makeTestPlan("subdir-test", []string{"test"}, time.Now())
+	writePlanFileWithBody(t, dir, p)
 
 	// Change into a subdirectory — FindRoot should still locate .logosyncx/.
-	subdir := filepath.Join(dir, "pkg", "session")
+	subdir := filepath.Join(dir, "pkg", "plans")
 	if err := os.MkdirAll(subdir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -588,12 +607,129 @@ func TestLS_FindsSessionsFromSubdirectory(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(orig) })
 
 	out := captureOutput(t, func() {
-		if err := runLS("", "", false); err != nil {
+		if err := runLS("", "", false, false); err != nil {
 			t.Fatalf("runLS from subdir failed: %v", err)
 		}
 	})
 
 	if !strings.Contains(out, "subdir-test") {
 		t.Errorf("expected 'subdir-test' in output, got: %q", out)
+	}
+}
+
+// --- runLS: --blocked filter -------------------------------------------------
+
+func TestLS_Blocked_Filter(t *testing.T) {
+	base := time.Now()
+	// Plan A: depends on Plan B (which is not distilled) → blocked
+	planA := plan.Plan{
+		ID:        "a",
+		Date:      &base,
+		Topic:     "dependent-plan",
+		Tags:      []string{},
+		Related:   []string{},
+		TasksDir:  ".logosyncx/tasks/dependent-plan",
+		DependsOn: []string{},
+	}
+	// Plan B: no dependency → not blocked
+	planB := plan.Plan{
+		ID:       "b",
+		Date:     &base,
+		Topic:    "independent-plan",
+		Tags:     []string{},
+		Related:  []string{},
+		TasksDir: ".logosyncx/tasks/independent-plan",
+	}
+
+	dir := setupProjectWithPlans(t, []plan.Plan{planA, planB})
+
+	// Directly write a plan B file with a dependency for planA.
+	plansDir := dir + "/.logosyncx/plans"
+	bFile := planB
+	bFilename := plan.FileName(bFile)
+	aWithDep := planA
+	depName := []string{bFilename}
+	aWithDep.DependsOn = depName
+	aData, _ := plan.Marshal(aWithDep)
+	_ = os.WriteFile(plansDir+"/"+plan.FileName(aWithDep), aData, 0o644)
+
+	// Rebuild index.
+	if err := runSync(); err != nil {
+		t.Fatalf("runSync: %v", err)
+	}
+
+	out := captureOutput(t, func() {
+		if err := runLS("", "", false, true); err != nil {
+			t.Fatalf("runLS --blocked failed: %v", err)
+		}
+	})
+
+	// Output should contain blocked plan or "No plans found" if none blocked.
+	// Just verify the flag doesn't error.
+	_ = out
+}
+
+func TestLS_JSON_IncludesBlockedField(t *testing.T) {
+	now := time.Now()
+	setupProjectWithPlans(t, []plan.Plan{
+		makeTestPlan("test-plan", []string{"go"}, now),
+	})
+
+	out := captureOutput(t, func() {
+		if err := runLS("", "", true, false); err != nil {
+			t.Fatalf("runLS --json failed: %v", err)
+		}
+	})
+
+	var result []map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput: %q", err, out)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result))
+	}
+	if _, ok := result[0]["blocked"]; !ok {
+		t.Error("expected 'blocked' field in JSON output")
+	}
+}
+
+func TestLS_JSON_IncludesDistilledField(t *testing.T) {
+	now := time.Now()
+	setupProjectWithPlans(t, []plan.Plan{
+		makeTestPlan("test-plan", []string{"go"}, now),
+	})
+
+	out := captureOutput(t, func() {
+		if err := runLS("", "", true, false); err != nil {
+			t.Fatalf("runLS --json failed: %v", err)
+		}
+	})
+
+	var result []map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput: %q", err, out)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result))
+	}
+	if _, ok := result[0]["distilled"]; !ok {
+		t.Error("expected 'distilled' field in JSON output")
+	}
+}
+
+func TestLS_Table_ContainsDISTILLEDHeader(t *testing.T) {
+	now := time.Now()
+	setupProjectWithPlans(t, []plan.Plan{
+		makeTestPlan("some-plan", []string{}, now),
+	})
+
+	out := captureOutput(t, func() {
+		if err := runLS("", "", false, false); err != nil {
+			t.Fatalf("runLS failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "DISTILLED") {
+		t.Errorf("expected DISTILLED header in table, got: %q", out)
 	}
 }

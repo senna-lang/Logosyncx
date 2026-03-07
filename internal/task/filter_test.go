@@ -7,14 +7,14 @@ import (
 
 // --- helpers -----------------------------------------------------------------
 
-func makeFilterTask(id, title string, status Status, priority Priority, session string, tags []string, excerpt string) *Task {
+func makeFilterTask(id, title string, status Status, priority Priority, plan string, tags []string, excerpt string) *Task {
 	return &Task{
 		ID:       id,
 		Date:     time.Now(),
 		Title:    title,
 		Status:   status,
 		Priority: priority,
-		Session:  session,
+		Plan:     plan,
 		Tags:     tags,
 		Excerpt:  excerpt,
 	}
@@ -47,14 +47,14 @@ func TestApply_EmptyInput_ReturnsEmpty(t *testing.T) {
 	}
 }
 
-// --- Apply: Session filter ---------------------------------------------------
+// --- Apply: Plan filter ------------------------------------------------------
 
-func TestApply_SessionFilter_MatchesSubstring(t *testing.T) {
+func TestApply_PlanFilter_MatchesSubstring(t *testing.T) {
 	tasks := []*Task{
-		makeFilterTask("t-1", "auth-task", StatusOpen, PriorityMedium, "2025-02-20_auth-refactor.md", nil, ""),
-		makeFilterTask("t-2", "db-task", StatusOpen, PriorityMedium, "2025-02-18_db-schema.md", nil, ""),
+		makeFilterTask("t-1", "auth-task", StatusOpen, PriorityMedium, "20260304-auth-refactor", nil, ""),
+		makeFilterTask("t-2", "db-task", StatusOpen, PriorityMedium, "20260305-db-schema", nil, ""),
 	}
-	got := Apply(tasks, Filter{Session: "auth"})
+	got := Apply(tasks, Filter{Plan: "auth"})
 	if len(got) != 1 {
 		t.Fatalf("expected 1 match, got %d", len(got))
 	}
@@ -63,34 +63,46 @@ func TestApply_SessionFilter_MatchesSubstring(t *testing.T) {
 	}
 }
 
-func TestApply_SessionFilter_CaseInsensitive(t *testing.T) {
+func TestApply_PlanFilter_CaseInsensitive(t *testing.T) {
 	tasks := []*Task{
-		makeFilterTask("t-1", "task", StatusOpen, PriorityMedium, "2025-02-20_AUTH-refactor.md", nil, ""),
+		makeFilterTask("t-1", "task", StatusOpen, PriorityMedium, "20260304-AUTH-refactor", nil, ""),
 	}
-	got := Apply(tasks, Filter{Session: "auth"})
+	got := Apply(tasks, Filter{Plan: "auth"})
 	if len(got) != 1 {
-		t.Errorf("expected 1 match for case-insensitive session filter, got %d", len(got))
+		t.Errorf("expected 1 match for case-insensitive plan filter, got %d", len(got))
 	}
 }
 
-func TestApply_SessionFilter_NoMatch(t *testing.T) {
+func TestApply_PlanFilter_NoMatch(t *testing.T) {
 	tasks := []*Task{
-		makeFilterTask("t-1", "task", StatusOpen, PriorityMedium, "2025-02-20_auth.md", nil, ""),
+		makeFilterTask("t-1", "task", StatusOpen, PriorityMedium, "20260304-auth-refactor", nil, ""),
 	}
-	got := Apply(tasks, Filter{Session: "postgres"})
+	got := Apply(tasks, Filter{Plan: "postgres"})
 	if len(got) != 0 {
 		t.Errorf("expected 0 matches, got %d", len(got))
 	}
 }
 
-func TestApply_SessionFilter_EmptySession_NotFiltered(t *testing.T) {
+func TestApply_PlanFilter_Empty_MatchesAll(t *testing.T) {
 	tasks := []*Task{
 		makeFilterTask("t-1", "task", StatusOpen, PriorityMedium, "", nil, ""),
 	}
-	// Empty filter.Session means "no constraint", so the task should pass.
 	got := Apply(tasks, Filter{})
 	if len(got) != 1 {
-		t.Errorf("expected 1 task when no session filter, got %d", len(got))
+		t.Errorf("expected 1 task when no plan filter, got %d", len(got))
+	}
+}
+
+func TestFilter_PlanPartial(t *testing.T) {
+	tasks := []*Task{
+		makeFilterTask("t-1", "task-a", StatusOpen, PriorityMedium, "20260304-auth-refactor", nil, ""),
+		makeFilterTask("t-2", "task-b", StatusOpen, PriorityMedium, "20260305-db-schema", nil, ""),
+		makeFilterTask("t-3", "task-c", StatusOpen, PriorityMedium, "20260304-auth-cleanup", nil, ""),
+	}
+	// "auth" matches two plans.
+	got := Apply(tasks, Filter{Plan: "auth"})
+	if len(got) != 2 {
+		t.Errorf("expected 2 matches for partial plan 'auth', got %d", len(got))
 	}
 }
 
@@ -126,7 +138,7 @@ func TestApply_StatusFilter_NoMatch(t *testing.T) {
 	tasks := []*Task{
 		makeFilterTask("t-1", "task", StatusOpen, PriorityMedium, "", nil, ""),
 	}
-	got := Apply(tasks, Filter{Status: StatusCancelled})
+	got := Apply(tasks, Filter{Status: StatusDone})
 	if len(got) != 0 {
 		t.Errorf("expected 0 matches, got %d", len(got))
 	}
@@ -197,7 +209,6 @@ func TestApply_TagsFilter_AnyTagMatches(t *testing.T) {
 		makeFilterTask("t-2", "task-b", StatusOpen, PriorityMedium, "", []string{"security"}, ""),
 		makeFilterTask("t-3", "task-c", StatusOpen, PriorityMedium, "", []string{"postgres"}, ""),
 	}
-	// Filter with two tags — task must match at least one.
 	got := Apply(tasks, Filter{Tags: []string{"auth", "security"}})
 	if len(got) != 2 {
 		t.Fatalf("expected 2 matches, got %d", len(got))
@@ -311,6 +322,36 @@ func TestApply_KeywordFilter_Empty_MatchesAll(t *testing.T) {
 	}
 }
 
+// --- Apply: Blocked filter (JSON path) ---------------------------------------
+
+func TestFilter_Blocked(t *testing.T) {
+	entries := []TaskJSON{
+		{ID: "t-1", Title: "blocked-task", Status: StatusOpen, Priority: PriorityMedium,
+			Tags: []string{}, DependsOn: []int{}, Blocked: true},
+		{ID: "t-2", Title: "free-task", Status: StatusOpen, Priority: PriorityMedium,
+			Tags: []string{}, DependsOn: []int{}, Blocked: false},
+	}
+	got := ApplyToJSON(entries, Filter{Blocked: true})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 blocked task, got %d", len(got))
+	}
+	if got[0].Title != "blocked-task" {
+		t.Errorf("expected 'blocked-task', got %q", got[0].Title)
+	}
+}
+
+func TestFilter_Blocked_False_MatchesAll(t *testing.T) {
+	entries := []TaskJSON{
+		{ID: "t-1", Title: "blocked", Tags: []string{}, DependsOn: []int{}, Blocked: true},
+		{ID: "t-2", Title: "unblocked", Tags: []string{}, DependsOn: []int{}, Blocked: false},
+	}
+	// Blocked: false means "no constraint on blocked"
+	got := ApplyToJSON(entries, Filter{Blocked: false})
+	if len(got) != 2 {
+		t.Errorf("Blocked=false should match all tasks, got %d", len(got))
+	}
+}
+
 // --- Apply: combined filters -------------------------------------------------
 
 func TestApply_CombinedStatusAndPriority(t *testing.T) {
@@ -342,20 +383,19 @@ func TestApply_CombinedTagAndKeyword(t *testing.T) {
 		makeFilterTask("t-1", "jwt-login", StatusOpen, PriorityMedium, "", []string{"auth"}, "JWT tokens used."),
 		makeFilterTask("t-2", "jwt-payment", StatusOpen, PriorityMedium, "", []string{"billing"}, "JWT for payments."),
 	}
-	// Only auth-tagged tasks containing "jwt".
 	got := Apply(tasks, Filter{Tags: []string{"auth"}, Keyword: "jwt"})
 	if len(got) != 1 || got[0].Title != "jwt-login" {
 		t.Errorf("expected 'jwt-login', got %v", got)
 	}
 }
 
-func TestApply_CombinedSessionAndStatus(t *testing.T) {
+func TestApply_CombinedPlanAndStatus(t *testing.T) {
 	tasks := []*Task{
-		makeFilterTask("t-1", "task-a", StatusOpen, PriorityMedium, "auth-refactor.md", nil, ""),
-		makeFilterTask("t-2", "task-b", StatusInProgress, PriorityMedium, "auth-refactor.md", nil, ""),
-		makeFilterTask("t-3", "task-c", StatusOpen, PriorityMedium, "db-schema.md", nil, ""),
+		makeFilterTask("t-1", "task-a", StatusOpen, PriorityMedium, "20260304-auth-refactor", nil, ""),
+		makeFilterTask("t-2", "task-b", StatusInProgress, PriorityMedium, "20260304-auth-refactor", nil, ""),
+		makeFilterTask("t-3", "task-c", StatusOpen, PriorityMedium, "20260305-db-schema", nil, ""),
 	}
-	got := Apply(tasks, Filter{Session: "auth", Status: StatusOpen})
+	got := Apply(tasks, Filter{Plan: "auth", Status: StatusOpen})
 	if len(got) != 1 || got[0].Title != "task-a" {
 		t.Errorf("expected 'task-a', got %v", got)
 	}
@@ -363,12 +403,12 @@ func TestApply_CombinedSessionAndStatus(t *testing.T) {
 
 func TestApply_AllFiltersActive_NarrowsToOne(t *testing.T) {
 	tasks := []*Task{
-		makeFilterTask("t-1", "auth-login", StatusOpen, PriorityHigh, "auth-session.md", []string{"auth", "jwt"}, "Implement login flow."),
-		makeFilterTask("t-2", "auth-signup", StatusOpen, PriorityMedium, "auth-session.md", []string{"auth"}, "Implement signup flow."),
-		makeFilterTask("t-3", "cache-layer", StatusInProgress, PriorityHigh, "cache-session.md", []string{"redis"}, "Redis caching."),
+		makeFilterTask("t-1", "auth-login", StatusOpen, PriorityHigh, "20260304-auth-refactor", []string{"auth", "jwt"}, "Implement login flow."),
+		makeFilterTask("t-2", "auth-signup", StatusOpen, PriorityMedium, "20260304-auth-refactor", []string{"auth"}, "Implement signup flow."),
+		makeFilterTask("t-3", "cache-layer", StatusInProgress, PriorityHigh, "20260305-cache", []string{"redis"}, "Redis caching."),
 	}
 	got := Apply(tasks, Filter{
-		Session:  "auth",
+		Plan:     "auth",
 		Status:   StatusOpen,
 		Priority: PriorityHigh,
 		Tags:     []string{"jwt"},

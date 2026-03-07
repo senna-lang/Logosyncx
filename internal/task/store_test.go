@@ -11,7 +11,9 @@ import (
 	"github.com/senna-lang/logosyncx/pkg/config"
 )
 
-// --- helpers -----------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 func setupStore(t *testing.T) (string, *Store) {
 	t.Helper()
@@ -19,40 +21,52 @@ func setupStore(t *testing.T) (string, *Store) {
 	if err := os.MkdirAll(filepath.Join(dir, ".logosyncx", "tasks"), 0o755); err != nil {
 		t.Fatalf("mkdir tasks: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, ".logosyncx", "sessions"), 0o755); err != nil {
-		t.Fatalf("mkdir sessions: %v", err)
-	}
 	cfg := config.Default("test-project")
 	return dir, NewStore(dir, &cfg)
 }
 
-func writeTaskFile(t *testing.T, store *Store, title, status, priority string, date time.Time) string {
+// createTask is a test helper that creates a task via store.Create and returns
+// the resulting *Task (reloaded from disk).
+func createTask(t *testing.T, store *Store, plan, title, status, priority string, dependsOn []int) *Task {
 	t.Helper()
 	tk := &Task{
-		Title:    title,
-		Status:   Status(status),
-		Priority: Priority(priority),
-		Date:     date,
-		Tags:     []string{},
-		Body:     "## What\nTest task: " + title + ".\n",
+		Title:     title,
+		Plan:      plan,
+		Status:    Status(status),
+		Priority:  Priority(priority),
+		Tags:      []string{},
+		DependsOn: dependsOn,
 	}
-	path, err := store.Save(tk, tk.Body)
+	path, err := store.Create(tk)
 	if err != nil {
-		t.Fatalf("Save %q: %v", title, err)
+		t.Fatalf("Create %q: %v", title, err)
+	}
+	loaded, err := store.loadFile(path)
+	if err != nil {
+		t.Fatalf("loadFile after Create %q: %v", title, err)
+	}
+	return loaded
+}
+
+// writePlanTaskMD writes a raw TASK.md under tasks/<plan>/<taskDir>/ without
+// going through store.Create. Useful for testing loadAll / RebuildTaskIndex
+// with hand-crafted content.
+func writePlanTaskMD(t *testing.T, dir, plan, taskDir, content string) string {
+	t.Helper()
+	p := filepath.Join(dir, ".logosyncx", "tasks", plan, taskDir)
+	if err := os.MkdirAll(p, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", p, err)
+	}
+	path := filepath.Join(p, taskFileName)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write TASK.md: %v", err)
 	}
 	return path
 }
 
-func writeSessionFile(t *testing.T, dir, filename string) {
-	t.Helper()
-	content := "---\nid: s1\ntopic: test\n---\n\n## Summary\nTest session.\n"
-	path := filepath.Join(dir, ".logosyncx", "sessions", filename)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("write session %q: %v", filename, err)
-	}
-}
-
-// --- NewStore ----------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// NewStore
+// ---------------------------------------------------------------------------
 
 func TestNewStore_SetsCorrectPaths(t *testing.T) {
 	dir := t.TempDir()
@@ -61,400 +75,436 @@ func TestNewStore_SetsCorrectPaths(t *testing.T) {
 	if s.dir != filepath.Join(dir, ".logosyncx", "tasks") {
 		t.Errorf("dir = %q, want .logosyncx/tasks", s.dir)
 	}
-	if s.sessionDir != filepath.Join(dir, ".logosyncx", "sessions") {
-		t.Errorf("sessionDir = %q, want .logosyncx/sessions", s.sessionDir)
+	if s.plansDir != filepath.Join(dir, ".logosyncx", "plans") {
+		t.Errorf("plansDir = %q, want .logosyncx/plans", s.plansDir)
 	}
 }
 
-// --- Save --------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// NextSeq
+// ---------------------------------------------------------------------------
 
-func TestSave_CreatesFile(t *testing.T) {
+func TestStore_NextSeq_EmptyDir_Returns1(t *testing.T) {
 	_, store := setupStore(t)
-	tk := &Task{
-		Title:    "Implement auth",
-		Status:   StatusOpen,
-		Priority: PriorityHigh,
-		Body:     "## What\nImplement JWT.\n",
-	}
-	path, err := store.Save(tk, tk.Body)
+	planGroupDir := filepath.Join(store.dir, "20260304-auth-refactor")
+	// Directory does not exist yet.
+	seq, err := store.NextSeq(planGroupDir)
 	if err != nil {
-		t.Fatalf("Save: %v", err)
+		t.Fatalf("NextSeq: %v", err)
 	}
+	if seq != 1 {
+		t.Errorf("NextSeq = %d, want 1", seq)
+	}
+}
+
+func TestStore_NextSeq_ExistingTasks(t *testing.T) {
+	_, store := setupStore(t)
+	planGroupDir := filepath.Join(store.dir, "20260304-auth-refactor")
+	// Create two task directories manually.
+	for _, name := range []string{"001-setup-keys", "002-add-middleware"} {
+		if err := os.MkdirAll(filepath.Join(planGroupDir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seq, err := store.NextSeq(planGroupDir)
+	if err != nil {
+		t.Fatalf("NextSeq: %v", err)
+	}
+	if seq != 3 {
+		t.Errorf("NextSeq = %d, want 3", seq)
+	}
+}
+
+func TestStore_NextSeq_NonContiguousSeqs(t *testing.T) {
+	_, store := setupStore(t)
+	planGroupDir := filepath.Join(store.dir, "20260304-auth")
+	for _, name := range []string{"001-alpha", "005-gamma"} {
+		if err := os.MkdirAll(filepath.Join(planGroupDir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seq, err := store.NextSeq(planGroupDir)
+	if err != nil {
+		t.Fatalf("NextSeq: %v", err)
+	}
+	if seq != 6 {
+		t.Errorf("NextSeq = %d, want 6", seq)
+	}
+}
+
+func TestStore_NextSeq_IgnoresFiles(t *testing.T) {
+	_, store := setupStore(t)
+	planGroupDir := filepath.Join(store.dir, "20260304-auth")
+	if err := os.MkdirAll(planGroupDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A file (not dir) should be ignored even if it has a numeric prefix.
+	_ = os.WriteFile(filepath.Join(planGroupDir, "003-readme.md"), []byte("x"), 0o644)
+	seq, err := store.NextSeq(planGroupDir)
+	if err != nil {
+		t.Fatalf("NextSeq: %v", err)
+	}
+	if seq != 1 {
+		t.Errorf("NextSeq = %d, want 1 (files ignored)", seq)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Create
+// ---------------------------------------------------------------------------
+
+func TestStore_Create_WritesTaskMDInPlanGroupDir(t *testing.T) {
+	dir, store := setupStore(t)
+	tk := &Task{Title: "Add JWT middleware", Plan: "20260304-auth-refactor", Tags: []string{}}
+
+	path, err := store.Create(tk)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// TASK.md must exist at the returned path.
 	if _, err := os.Stat(path); err != nil {
-		t.Errorf("expected file at %s, got: %v", path, err)
+		t.Fatalf("TASK.md not found at %s: %v", path, err)
+	}
+
+	// The file must be inside tasks/20260304-auth-refactor/.
+	rel, err := filepath.Rel(filepath.Join(dir, ".logosyncx", "tasks", "20260304-auth-refactor"), path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		t.Errorf("TASK.md %q is not inside plan group dir", path)
 	}
 }
 
-func TestSave_FileInStatusSubdir(t *testing.T) {
+func TestStore_Create_AutoAssignsSeq(t *testing.T) {
 	_, store := setupStore(t)
-	path := writeTaskFile(t, store, "subdir-test", "in_progress", "medium", time.Now())
 
-	expectedSubdir := filepath.Join(store.dir, "in_progress")
-	if !strings.HasPrefix(path, expectedSubdir) {
-		t.Errorf("expected path under tasks/in_progress/, got %q", path)
+	tk1 := &Task{Title: "First task", Plan: "20260304-auth", Tags: []string{}}
+	if _, err := store.Create(tk1); err != nil {
+		t.Fatalf("Create first: %v", err)
+	}
+
+	tk2 := &Task{Title: "Second task", Plan: "20260304-auth", Tags: []string{}}
+	if _, err := store.Create(tk2); err != nil {
+		t.Fatalf("Create second: %v", err)
+	}
+
+	if tk1.Seq != 1 {
+		t.Errorf("first task Seq = %d, want 1", tk1.Seq)
+	}
+	if tk2.Seq != 2 {
+		t.Errorf("second task Seq = %d, want 2", tk2.Seq)
 	}
 }
 
-func TestSave_AutoFillsID(t *testing.T) {
+func TestStore_Create_DirNameFormat(t *testing.T) {
+	dir, store := setupStore(t)
+	tk := &Task{Title: "Setup RS256 keys", Plan: "20260304-auth", Tags: []string{}}
+	if _, err := store.Create(tk); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	planGroupDir := filepath.Join(dir, ".logosyncx", "tasks", "20260304-auth")
+	entries, err := os.ReadDir(planGroupDir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 task dir, got %d", len(entries))
+	}
+	name := entries[0].Name()
+	if !strings.HasPrefix(name, "001-") {
+		t.Errorf("task dir %q should start with '001-'", name)
+	}
+	if !strings.Contains(name, "setup-rs256-keys") {
+		t.Errorf("task dir %q should contain slug 'setup-rs256-keys'", name)
+	}
+}
+
+func TestStore_Create_AutoFillsID(t *testing.T) {
 	_, store := setupStore(t)
-	tk := &Task{Title: "autofill-id", Body: "## What\nTest.\n"}
-	if _, err := store.Save(tk, tk.Body); err != nil {
-		t.Fatalf("Save: %v", err)
+	tk := &Task{Title: "task", Plan: "20260304-auth", Tags: []string{}}
+	if _, err := store.Create(tk); err != nil {
+		t.Fatalf("Create: %v", err)
 	}
 	if tk.ID == "" {
-		t.Error("expected ID to be auto-filled, got empty string")
-	}
-}
-
-func TestSave_IDHasTPrefix(t *testing.T) {
-	_, store := setupStore(t)
-	tk := &Task{Title: "prefix-test", Body: "## What\nTest.\n"}
-	if _, err := store.Save(tk, tk.Body); err != nil {
-		t.Fatalf("Save: %v", err)
+		t.Error("expected ID to be auto-filled")
 	}
 	if !strings.HasPrefix(tk.ID, "t-") {
 		t.Errorf("ID = %q, want 't-' prefix", tk.ID)
 	}
 }
 
-func TestSave_PreservesExistingID(t *testing.T) {
+func TestStore_Create_AutoFillsDate(t *testing.T) {
 	_, store := setupStore(t)
-	tk := &Task{ID: "t-existing", Title: "preserve-id", Body: "## What\nTest.\n"}
-	if _, err := store.Save(tk, tk.Body); err != nil {
-		t.Fatalf("Save: %v", err)
+	tk := &Task{Title: "task", Plan: "20260304-auth", Tags: []string{}}
+	before := time.Now()
+	if _, err := store.Create(tk); err != nil {
+		t.Fatalf("Create: %v", err)
 	}
-	if tk.ID != "t-existing" {
-		t.Errorf("ID = %q, want 't-existing'", tk.ID)
+	if tk.Date.IsZero() {
+		t.Error("expected Date to be auto-filled")
+	}
+	if tk.Date.Before(before) {
+		t.Errorf("Date %v is before the test started", tk.Date)
 	}
 }
 
-func TestSave_AutoFillsDate(t *testing.T) {
+func TestStore_Create_AutoFillsStatusFromConfig(t *testing.T) {
 	_, store := setupStore(t)
-	before := time.Now().Add(-time.Second)
-	tk := &Task{Title: "autofill-date", Body: "## What\nTest.\n"}
-	if _, err := store.Save(tk, tk.Body); err != nil {
-		t.Fatalf("Save: %v", err)
+	tk := &Task{Title: "task", Plan: "20260304-auth", Tags: []string{}}
+	if _, err := store.Create(tk); err != nil {
+		t.Fatalf("Create: %v", err)
 	}
-	after := time.Now().Add(time.Second)
-	if tk.Date.Before(before) || tk.Date.After(after) {
-		t.Errorf("Date %v not in expected range", tk.Date)
+	if tk.Status != StatusOpen {
+		t.Errorf("Status = %q, want 'open' (default)", tk.Status)
 	}
 }
 
-func TestSave_PreservesExistingDate(t *testing.T) {
+func TestStore_Create_SetsTaskDirPath(t *testing.T) {
 	_, store := setupStore(t)
-	existing := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	tk := &Task{Date: existing, Title: "preserve-date", Body: "## What\nTest.\n"}
-	if _, err := store.Save(tk, tk.Body); err != nil {
-		t.Fatalf("Save: %v", err)
+	tk := &Task{Title: "dirpath test", Plan: "20260304-auth", Tags: []string{}}
+	if _, err := store.Create(tk); err != nil {
+		t.Fatalf("Create: %v", err)
 	}
-	if !tk.Date.Equal(existing) {
-		t.Errorf("Date = %v, want %v", tk.Date, existing)
+	if tk.DirPath == "" {
+		t.Error("expected DirPath to be set after Create")
+	}
+	if _, err := os.Stat(tk.DirPath); err != nil {
+		t.Errorf("DirPath %q does not exist: %v", tk.DirPath, err)
 	}
 }
 
-func TestSave_AutoFillsStatusFromConfig(t *testing.T) {
+func TestStore_Create_RequiresPlan(t *testing.T) {
 	_, store := setupStore(t)
-	tk := &Task{Title: "default-status", Body: "## What\nTest.\n"}
-	if _, err := store.Save(tk, tk.Body); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-	if tk.Status == "" {
-		t.Error("expected status to be auto-filled from config")
-	}
-	if tk.Status != Status(store.cfg.Tasks.DefaultStatus) {
-		t.Errorf("Status = %q, want %q", tk.Status, store.cfg.Tasks.DefaultStatus)
+	tk := &Task{Title: "task", Plan: "", Tags: []string{}}
+	_, err := store.Create(tk)
+	if err == nil {
+		t.Fatal("expected error when plan is empty, got nil")
 	}
 }
 
-func TestSave_AutoFillsPriorityFromConfig(t *testing.T) {
+func TestStore_Create_RequiresTitle(t *testing.T) {
 	_, store := setupStore(t)
-	tk := &Task{Title: "default-priority", Body: "## What\nTest.\n"}
-	if _, err := store.Save(tk, tk.Body); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-	if tk.Priority != Priority(store.cfg.Tasks.DefaultPriority) {
-		t.Errorf("Priority = %q, want %q", tk.Priority, store.cfg.Tasks.DefaultPriority)
+	tk := &Task{Title: "", Plan: "20260304-auth", Tags: []string{}}
+	_, err := store.Create(tk)
+	if err == nil {
+		t.Fatal("expected error when title is empty, got nil")
 	}
 }
 
-func TestSave_SetsFilenameAfterSave(t *testing.T) {
-	_, store := setupStore(t)
-	tk := &Task{Title: "filename-check", Body: "## What\nTest.\n"}
-	if _, err := store.Save(tk, tk.Body); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-	if tk.Filename == "" {
-		t.Error("expected Filename to be set after Save")
-	}
-	if !strings.Contains(tk.Filename, "filename-check") {
-		t.Errorf("Filename = %q, want it to contain 'filename-check'", tk.Filename)
-	}
-}
+func TestStore_Create_AppendsBothTasksInPlanGroup(t *testing.T) {
+	dir, store := setupStore(t)
+	createTask(t, store, "20260304-auth", "Task A", "open", "medium", nil)
+	createTask(t, store, "20260304-auth", "Task B", "open", "medium", nil)
 
-func TestSave_FileNameFormat(t *testing.T) {
-	_, store := setupStore(t)
-	writeTaskFile(t, store, "test task", "open", "medium",
-		time.Date(2025, 2, 20, 10, 0, 0, 0, time.UTC))
-
-	// File should be in tasks/open/
-	openDir := filepath.Join(store.dir, "open")
-	entries, err := os.ReadDir(openDir)
+	planGroupDir := filepath.Join(dir, ".logosyncx", "tasks", "20260304-auth")
+	entries, err := os.ReadDir(planGroupDir)
 	if err != nil {
-		t.Fatalf("ReadDir tasks/open: %v", err)
+		t.Fatalf("ReadDir: %v", err)
 	}
-	if len(entries) == 0 {
-		t.Fatal("expected at least one file in tasks/open/")
+	dirs := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			dirs++
+		}
 	}
-	name := entries[0].Name()
-	if !strings.HasSuffix(name, ".md") {
-		t.Errorf("filename %q should have .md suffix", name)
-	}
-	if len(name) < 11 || name[4] != '-' || name[7] != '-' || name[10] != '_' {
-		t.Errorf("filename %q should start with YYYY-MM-DD_", name)
+	if dirs != 2 {
+		t.Errorf("expected 2 task dirs, got %d", dirs)
 	}
 }
 
-func TestSave_SetsExcerptFromWhatSection(t *testing.T) {
+// ---------------------------------------------------------------------------
+// Get
+// ---------------------------------------------------------------------------
+
+func TestStore_Get_FindsByPartialName(t *testing.T) {
 	_, store := setupStore(t)
-	tk := &Task{
-		Title: "excerpt-test",
-		Body:  "## What\nThe excerpt content from what section.\n",
-	}
-	if _, err := store.Save(tk, tk.Body); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-	if !strings.Contains(tk.Excerpt, "excerpt content") {
-		t.Errorf("Excerpt = %q, want it to contain 'excerpt content'", tk.Excerpt)
-	}
-}
+	createTask(t, store, "20260304-auth", "Add JWT middleware", "open", "medium", nil)
 
-func TestSave_CreatesDirIfNotExist(t *testing.T) {
-	dir := t.TempDir()
-	// Do NOT create tasks/ dir — Save should create it (including the status subdir).
-	if err := os.MkdirAll(filepath.Join(dir, ".logosyncx"), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	cfg := config.Default("proj")
-	store := NewStore(dir, &cfg)
-
-	tk := &Task{Title: "create-dir", Body: "## What\nTest.\n"}
-	if _, err := store.Save(tk, tk.Body); err != nil {
-		t.Fatalf("Save should create tasks/open/ dir automatically: %v", err)
-	}
-	// Default status is "open", so tasks/open/ should have been created.
-	openDir := filepath.Join(store.dir, string(StatusOpen))
-	if _, err := os.Stat(openDir); err != nil {
-		t.Errorf("expected tasks/open/ dir to be created, got: %v", err)
-	}
-}
-
-// --- List --------------------------------------------------------------------
-
-func TestList_EmptyDir_ReturnsEmpty(t *testing.T) {
-	_, store := setupStore(t)
-	tasks, err := store.List(Filter{})
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(tasks) != 0 {
-		t.Errorf("expected 0 tasks, got %d", len(tasks))
-	}
-}
-
-func TestList_NoDirExists_ReturnsEmpty(t *testing.T) {
-	dir := t.TempDir()
-	cfg := config.Default("proj")
-	store := NewStore(dir, &cfg)
-	tasks, err := store.List(Filter{})
-	if err != nil {
-		t.Fatalf("List on missing dir should not error: %v", err)
-	}
-	if len(tasks) != 0 {
-		t.Errorf("expected 0 tasks, got %d", len(tasks))
-	}
-}
-
-func TestList_ReturnsAllTasks(t *testing.T) {
-	_, store := setupStore(t)
-	writeTaskFile(t, store, "task-one", "open", "high", time.Now())
-	writeTaskFile(t, store, "task-two", "open", "medium", time.Now())
-
-	tasks, err := store.List(Filter{})
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(tasks) != 2 {
-		t.Errorf("expected 2 tasks, got %d", len(tasks))
-	}
-}
-
-func TestList_ReturnsTasksAcrossAllStatusSubdirs(t *testing.T) {
-	_, store := setupStore(t)
-	writeTaskFile(t, store, "open-task", "open", "medium", time.Now())
-	writeTaskFile(t, store, "wip-task", "in_progress", "medium", time.Now())
-	writeTaskFile(t, store, "done-task", "done", "medium", time.Now())
-	writeTaskFile(t, store, "cancelled-task", "cancelled", "medium", time.Now())
-
-	tasks, err := store.List(Filter{})
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(tasks) != 4 {
-		t.Errorf("expected 4 tasks across all subdirs, got %d", len(tasks))
-	}
-}
-
-func TestList_SortedNewestFirst(t *testing.T) {
-	_, store := setupStore(t)
-	older := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
-	newer := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
-
-	writeTaskFile(t, store, "old-task", "open", "medium", older)
-	writeTaskFile(t, store, "new-task", "open", "medium", newer)
-
-	tasks, err := store.List(Filter{})
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(tasks) != 2 {
-		t.Fatalf("expected 2 tasks, got %d", len(tasks))
-	}
-	if tasks[0].Title != "new-task" {
-		t.Errorf("expected newest first, got %q", tasks[0].Title)
-	}
-}
-
-func TestList_AppliesStatusFilter(t *testing.T) {
-	_, store := setupStore(t)
-	writeTaskFile(t, store, "open-task", "open", "medium", time.Now())
-	writeTaskFile(t, store, "wip-task", "in_progress", "medium", time.Now())
-
-	tasks, err := store.List(Filter{Status: StatusOpen})
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(tasks) != 1 || tasks[0].Title != "open-task" {
-		t.Errorf("expected only 'open-task', got %v", tasks)
-	}
-}
-
-func TestList_AppliesPriorityFilter(t *testing.T) {
-	_, store := setupStore(t)
-	writeTaskFile(t, store, "high-task", "open", "high", time.Now())
-	writeTaskFile(t, store, "low-task", "open", "low", time.Now())
-
-	tasks, err := store.List(Filter{Priority: PriorityHigh})
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(tasks) != 1 || tasks[0].Title != "high-task" {
-		t.Errorf("expected only 'high-task', got %v", tasks)
-	}
-}
-
-// --- Get ---------------------------------------------------------------------
-
-func TestGet_ExactFilenameMatch(t *testing.T) {
-	_, store := setupStore(t)
-	path := writeTaskFile(t, store, "auth-task", "open", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
-	filename := filepath.Base(path)
-
-	got, err := store.Get(filename)
+	got, err := store.Get("", "jwt")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if got.Title != "auth-task" {
-		t.Errorf("Title = %q, want 'auth-task'", got.Title)
+	if got.Title != "Add JWT middleware" {
+		t.Errorf("Title = %q, want 'Add JWT middleware'", got.Title)
 	}
 }
 
-func TestGet_PartialMatch(t *testing.T) {
+func TestStore_Get_FindsByPlanPartial(t *testing.T) {
 	_, store := setupStore(t)
-	writeTaskFile(t, store, "auth-task", "open", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
+	createTask(t, store, "20260304-auth-refactor", "Task A", "open", "medium", nil)
+	createTask(t, store, "20260305-db-schema", "Task A", "open", "medium", nil)
 
-	got, err := store.Get("auth-task")
+	// "task-a" matches both, but "auth" plan partial narrows it to one.
+	got, err := store.Get("auth", "task-a")
 	if err != nil {
-		t.Fatalf("Get partial match: %v", err)
+		t.Fatalf("Get with planPartial: %v", err)
 	}
-	if got.Title != "auth-task" {
-		t.Errorf("Title = %q, want 'auth-task'", got.Title)
-	}
-}
-
-func TestGet_FindsAcrossStatusSubdirs(t *testing.T) {
-	_, store := setupStore(t)
-	writeTaskFile(t, store, "open-task", "open", "medium", time.Now())
-	writeTaskFile(t, store, "done-task", "done", "medium", time.Now())
-
-	got, err := store.Get("done-task")
-	if err != nil {
-		t.Fatalf("Get across subdirs: %v", err)
-	}
-	if got.Title != "done-task" {
-		t.Errorf("Title = %q, want 'done-task'", got.Title)
-	}
-	if got.Status != StatusDone {
-		t.Errorf("Status = %q, want 'done'", got.Status)
+	if got.Plan != "20260304-auth-refactor" {
+		t.Errorf("Plan = %q, want '20260304-auth-refactor'", got.Plan)
 	}
 }
 
-func TestGet_NotFound_ReturnsErrNotFound(t *testing.T) {
+func TestStore_Get_NotFound_ReturnsErrNotFound(t *testing.T) {
 	_, store := setupStore(t)
-
-	_, err := store.Get("nonexistent")
+	_, err := store.Get("", "nonexistent")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
 
-func TestGet_AmbiguousMatch_ReturnsErrAmbiguous(t *testing.T) {
+func TestStore_Get_AmbiguousAcrossPlans(t *testing.T) {
 	_, store := setupStore(t)
-	writeTaskFile(t, store, "auth-login", "open", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
-	writeTaskFile(t, store, "auth-signup", "open", "medium", time.Date(2025, 2, 21, 0, 0, 0, 0, time.UTC))
+	createTask(t, store, "20260304-auth", "Add middleware", "open", "medium", nil)
+	createTask(t, store, "20260305-db", "Add middleware", "open", "medium", nil)
 
-	_, err := store.Get("auth")
+	// Both plans have a task matching "add-middleware" and no plan filter.
+	_, err := store.Get("", "add-middleware")
 	if !errors.Is(err, ErrAmbiguous) {
 		t.Errorf("expected ErrAmbiguous, got %v", err)
 	}
 }
 
-func TestGet_AmbiguousAcrossSubdirs(t *testing.T) {
+func TestStore_Get_CaseInsensitive(t *testing.T) {
 	_, store := setupStore(t)
-	// Same slug in different status dirs would be ambiguous.
-	writeTaskFile(t, store, "auth-login", "open", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
-	writeTaskFile(t, store, "auth-logout", "done", "medium", time.Date(2025, 2, 21, 0, 0, 0, 0, time.UTC))
+	createTask(t, store, "20260304-auth", "Add JWT Middleware", "open", "medium", nil)
 
-	_, err := store.Get("auth")
-	if !errors.Is(err, ErrAmbiguous) {
-		t.Errorf("expected ErrAmbiguous across subdirs, got %v", err)
-	}
-}
-
-func TestGet_CaseInsensitive(t *testing.T) {
-	_, store := setupStore(t)
-	writeTaskFile(t, store, "auth-task", "open", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
-
-	got, err := store.Get("AUTH-TASK")
+	got, err := store.Get("", "ADD-JWT")
 	if err != nil {
 		t.Fatalf("Get case-insensitive: %v", err)
 	}
-	if got.Title != "auth-task" {
-		t.Errorf("Title = %q, want 'auth-task'", got.Title)
+	if got.Title != "Add JWT Middleware" {
+		t.Errorf("Title = %q, want 'Add JWT Middleware'", got.Title)
 	}
 }
 
-// --- UpdateFields ------------------------------------------------------------
-
-func TestUpdateFields_Status(t *testing.T) {
+func TestStore_GetByName_SearchesAllPlans(t *testing.T) {
 	_, store := setupStore(t)
-	writeTaskFile(t, store, "update-status", "open", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
+	createTask(t, store, "20260304-auth", "Unique task name", "open", "medium", nil)
 
-	if err := store.UpdateFields("update-status", map[string]string{"status": "in_progress"}); err != nil {
+	got, err := store.GetByName("unique-task")
+	if err != nil {
+		t.Fatalf("GetByName: %v", err)
+	}
+	if got.Title != "Unique task name" {
+		t.Errorf("Title = %q, want 'Unique task name'", got.Title)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// List
+// ---------------------------------------------------------------------------
+
+func TestStore_List_EmptyTasks_ReturnsEmpty(t *testing.T) {
+	_, store := setupStore(t)
+	tasks, err := store.List(Filter{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Errorf("expected 0 tasks, got %d", len(tasks))
+	}
+}
+
+func TestStore_List_ReturnsAllTasks(t *testing.T) {
+	_, store := setupStore(t)
+	createTask(t, store, "20260304-auth", "Task A", "open", "medium", nil)
+	createTask(t, store, "20260304-auth", "Task B", "open", "medium", nil)
+	createTask(t, store, "20260305-db", "Task C", "in_progress", "high", nil)
+
+	tasks, err := store.List(Filter{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(tasks) != 3 {
+		t.Errorf("expected 3 tasks, got %d", len(tasks))
+	}
+}
+
+func TestStore_List_FilterByStatus(t *testing.T) {
+	_, store := setupStore(t)
+	createTask(t, store, "20260304-auth", "Open task", "open", "medium", nil)
+	createTask(t, store, "20260304-auth", "Done task", "done", "medium", nil)
+
+	tasks, err := store.List(Filter{Status: StatusOpen})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 open task, got %d", len(tasks))
+	}
+	if tasks[0].Status != StatusOpen {
+		t.Errorf("Status = %q, want 'open'", tasks[0].Status)
+	}
+}
+
+func TestStore_List_FilterByPlan(t *testing.T) {
+	_, store := setupStore(t)
+	createTask(t, store, "20260304-auth", "Auth task", "open", "medium", nil)
+	createTask(t, store, "20260305-db", "DB task", "open", "medium", nil)
+
+	tasks, err := store.List(Filter{Plan: "auth"})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 auth task, got %d", len(tasks))
+	}
+	if tasks[0].Title != "Auth task" {
+		t.Errorf("Title = %q, want 'Auth task'", tasks[0].Title)
+	}
+}
+
+func TestStore_List_SortedNewestFirst(t *testing.T) {
+	_, store := setupStore(t)
+
+	// Create tasks and manually set dates via raw write to control ordering.
+	older := "---\nid: t-001\ntitle: old\nseq: 1\ndate: 2025-01-01T00:00:00Z\nstatus: open\npriority: medium\nplan: 20260304-auth\ntags: []\nassignee: \n---\n\n## What\nOld task.\n"
+	newer := "---\nid: t-002\ntitle: new\nseq: 2\ndate: 2025-06-01T00:00:00Z\nstatus: open\npriority: medium\nplan: 20260304-auth\ntags: []\nassignee: \n---\n\n## What\nNew task.\n"
+	writePlanTaskMD(t, store.projectRoot, "20260304-auth", "001-old", older)
+	writePlanTaskMD(t, store.projectRoot, "20260304-auth", "002-new", newer)
+
+	tasks, err := store.List(Filter{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(tasks) < 2 {
+		t.Fatalf("expected at least 2 tasks, got %d", len(tasks))
+	}
+	if !tasks[0].Date.After(tasks[1].Date) {
+		t.Errorf("expected newest first: tasks[0].Date=%v tasks[1].Date=%v",
+			tasks[0].Date, tasks[1].Date)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// UpdateFields
+// ---------------------------------------------------------------------------
+
+func TestStore_UpdateFields_NoFileMoves(t *testing.T) {
+	dir, store := setupStore(t)
+	tk := createTask(t, store, "20260304-auth", "Update me", "open", "medium", nil)
+	originalDir := tk.DirPath
+
+	if err := store.UpdateFields("", "update-me", map[string]string{"status": "in_progress"}); err != nil {
 		t.Fatalf("UpdateFields: %v", err)
 	}
 
-	got, err := store.Get("update-status")
+	// DirPath must not change.
+	if _, err := os.Stat(filepath.Join(originalDir, taskFileName)); err != nil {
+		t.Errorf("TASK.md should still be at original path %s: %v", originalDir, err)
+	}
+	_ = dir
+}
+
+func TestStore_UpdateFields_UpdatesStatus(t *testing.T) {
+	_, store := setupStore(t)
+	createTask(t, store, "20260304-auth", "Status test", "open", "medium", nil)
+
+	if err := store.UpdateFields("", "status-test", map[string]string{"status": "in_progress"}); err != nil {
+		t.Fatalf("UpdateFields: %v", err)
+	}
+
+	got, err := store.GetByName("status-test")
 	if err != nil {
 		t.Fatalf("Get after update: %v", err)
 	}
@@ -463,218 +513,207 @@ func TestUpdateFields_Status(t *testing.T) {
 	}
 }
 
-func TestUpdateFields_Status_MovesFile(t *testing.T) {
+func TestStore_UpdateFields_UpdatesPriority(t *testing.T) {
 	_, store := setupStore(t)
-	path := writeTaskFile(t, store, "move-me", "open", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
+	createTask(t, store, "20260304-auth", "Priority test", "open", "medium", nil)
 
-	// Confirm the file starts in tasks/open/.
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("original file should exist at %s", path)
-	}
-
-	if err := store.UpdateFields("move-me", map[string]string{"status": "in_progress"}); err != nil {
+	if err := store.UpdateFields("", "priority-test", map[string]string{"priority": "high"}); err != nil {
 		t.Fatalf("UpdateFields: %v", err)
 	}
 
-	// Old path should no longer exist.
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("old file should have been removed from %s", path)
-	}
-
-	// File should now be in tasks/in_progress/.
-	filename := filepath.Base(path)
-	newPath := filepath.Join(store.dir, "in_progress", filename)
-	if _, err := os.Stat(newPath); err != nil {
-		t.Errorf("file should have been moved to %s: %v", newPath, err)
-	}
-}
-
-func TestUpdateFields_NonStatusField_DoesNotMoveFile(t *testing.T) {
-	_, store := setupStore(t)
-	path := writeTaskFile(t, store, "no-move", "open", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
-
-	if err := store.UpdateFields("no-move", map[string]string{"priority": "high"}); err != nil {
-		t.Fatalf("UpdateFields: %v", err)
-	}
-
-	// File should still be in tasks/open/.
-	if _, err := os.Stat(path); err != nil {
-		t.Errorf("file should remain at %s after non-status update: %v", path, err)
-	}
-}
-
-func TestUpdateFields_Priority(t *testing.T) {
-	_, store := setupStore(t)
-	writeTaskFile(t, store, "update-priority", "open", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
-
-	if err := store.UpdateFields("update-priority", map[string]string{"priority": "high"}); err != nil {
-		t.Fatalf("UpdateFields: %v", err)
-	}
-
-	got, err := store.Get("update-priority")
+	got, err := store.GetByName("priority-test")
 	if err != nil {
-		t.Fatalf("Get after update: %v", err)
+		t.Fatalf("Get: %v", err)
 	}
 	if got.Priority != PriorityHigh {
 		t.Errorf("Priority = %q, want 'high'", got.Priority)
 	}
 }
 
-func TestUpdateFields_Assignee(t *testing.T) {
+func TestStore_UpdateFields_UpdatesAssignee(t *testing.T) {
 	_, store := setupStore(t)
-	writeTaskFile(t, store, "update-assignee", "open", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
+	createTask(t, store, "20260304-auth", "Assignee test", "open", "medium", nil)
 
-	if err := store.UpdateFields("update-assignee", map[string]string{"assignee": "alice"}); err != nil {
+	if err := store.UpdateFields("", "assignee-test", map[string]string{"assignee": "alice"}); err != nil {
 		t.Fatalf("UpdateFields: %v", err)
 	}
 
-	got, err := store.Get("update-assignee")
+	got, err := store.GetByName("assignee-test")
 	if err != nil {
-		t.Fatalf("Get after update: %v", err)
+		t.Fatalf("Get: %v", err)
 	}
 	if got.Assignee != "alice" {
 		t.Errorf("Assignee = %q, want 'alice'", got.Assignee)
 	}
 }
 
-func TestUpdateFields_Session(t *testing.T) {
+func TestStore_UpdateFields_Done_SetsCompletedAt(t *testing.T) {
 	_, store := setupStore(t)
-	writeTaskFile(t, store, "update-session", "open", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
+	createTask(t, store, "20260304-auth", "Completed task", "open", "medium", nil)
 
-	if err := store.UpdateFields("update-session", map[string]string{"session": "2025-02-15_auth.md"}); err != nil {
+	before := time.Now()
+	if err := store.UpdateFields("", "completed-task", map[string]string{"status": "done"}); err != nil {
 		t.Fatalf("UpdateFields: %v", err)
 	}
 
-	got, err := store.Get("update-session")
+	got, err := store.GetByName("completed-task")
 	if err != nil {
-		t.Fatalf("Get after update: %v", err)
+		t.Fatalf("Get: %v", err)
 	}
-	if got.Session != "2025-02-15_auth.md" {
-		t.Errorf("Session = %q, want '2025-02-15_auth.md'", got.Session)
+	if got.CompletedAt == nil {
+		t.Fatal("expected CompletedAt to be set when status transitions to done")
+	}
+	if got.CompletedAt.Before(before) {
+		t.Errorf("CompletedAt %v is before the test started", got.CompletedAt)
 	}
 }
 
-func TestUpdateFields_MultipleFields(t *testing.T) {
+func TestStore_UpdateFields_Done_CreatesWalkthrough(t *testing.T) {
 	_, store := setupStore(t)
-	writeTaskFile(t, store, "multi-update", "open", "low", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
+	tk := createTask(t, store, "20260304-auth", "Walkthrough task", "open", "medium", nil)
 
-	if err := store.UpdateFields("multi-update", map[string]string{
-		"status":   "in_progress",
-		"priority": "high",
-		"assignee": "bob",
-	}); err != nil {
-		t.Fatalf("UpdateFields multiple: %v", err)
+	if err := store.UpdateFields("", "walkthrough-task", map[string]string{"status": "done"}); err != nil {
+		t.Fatalf("UpdateFields: %v", err)
 	}
 
-	got, err := store.Get("multi-update")
-	if err != nil {
-		t.Fatalf("Get after update: %v", err)
-	}
-	if got.Status != StatusInProgress {
-		t.Errorf("Status = %q, want 'in_progress'", got.Status)
-	}
-	if got.Priority != PriorityHigh {
-		t.Errorf("Priority = %q, want 'high'", got.Priority)
-	}
-	if got.Assignee != "bob" {
-		t.Errorf("Assignee = %q, want 'bob'", got.Assignee)
+	wtPath := filepath.Join(tk.DirPath, walkthroughFileName)
+	if _, err := os.Stat(wtPath); err != nil {
+		t.Errorf("WALKTHROUGH.md not created at %s: %v", wtPath, err)
 	}
 }
 
-func TestUpdateFields_UnknownField_ReturnsError(t *testing.T) {
+func TestStore_UpdateFields_Done_WalkthroughNotOverwritten(t *testing.T) {
 	_, store := setupStore(t)
-	writeTaskFile(t, store, "unknown-field", "open", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
+	tk := createTask(t, store, "20260304-auth", "Idempotent walkthrough", "open", "medium", nil)
 
-	err := store.UpdateFields("unknown-field", map[string]string{"nonexistent": "value"})
+	// Pre-create WALKTHROUGH.md with custom content.
+	wtPath := filepath.Join(tk.DirPath, walkthroughFileName)
+	customContent := "# Custom walkthrough content"
+	if err := os.WriteFile(wtPath, []byte(customContent), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Mark done — should NOT overwrite existing WALKTHROUGH.md.
+	if err := store.UpdateFields("", "idempotent-walkthrough", map[string]string{"status": "done"}); err != nil {
+		t.Fatalf("UpdateFields: %v", err)
+	}
+
+	data, err := os.ReadFile(wtPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != customContent {
+		t.Errorf("WALKTHROUGH.md was overwritten; got %q, want %q", string(data), customContent)
+	}
+}
+
+func TestStore_UpdateFields_InProgress_BlockedByDep_HardError(t *testing.T) {
+	_, store := setupStore(t)
+	// Create dep task (seq 1, open).
+	createTask(t, store, "20260304-auth", "Dep task", "open", "medium", nil)
+	// Create blocked task (seq 2, depends on seq 1).
+	createTask(t, store, "20260304-auth", "Blocked task", "open", "medium", []int{1})
+
+	err := store.UpdateFields("auth", "blocked-task", map[string]string{"status": "in_progress"})
 	if err == nil {
-		t.Error("expected error for unknown field, got nil")
+		t.Fatal("expected ErrBlocked error, got nil")
+	}
+	if !errors.Is(err, ErrBlocked) {
+		t.Errorf("expected ErrBlocked, got %v", err)
 	}
 }
 
-func TestUpdateFields_NotFound_ReturnsErrNotFound(t *testing.T) {
+func TestStore_UpdateFields_InProgress_NotBlocked_WhenDepDone(t *testing.T) {
 	_, store := setupStore(t)
-	err := store.UpdateFields("nonexistent", map[string]string{"status": "open"})
+	// Create dep task and mark it done.
+	createTask(t, store, "20260304-auth", "Dep task", "open", "medium", nil)
+	if err := store.UpdateFields("auth", "dep-task", map[string]string{"status": "done"}); err != nil {
+		t.Fatalf("mark dep done: %v", err)
+	}
+	// Create task that depends on seq 1.
+	createTask(t, store, "20260304-auth", "Unblocked task", "open", "medium", []int{1})
+
+	// Should succeed: dependency is done.
+	if err := store.UpdateFields("auth", "unblocked-task", map[string]string{"status": "in_progress"}); err != nil {
+		t.Fatalf("expected no error for unblocked task, got: %v", err)
+	}
+}
+
+func TestStore_UpdateFields_UnknownField_ReturnsError(t *testing.T) {
+	_, store := setupStore(t)
+	createTask(t, store, "20260304-auth", "Field test", "open", "medium", nil)
+
+	err := store.UpdateFields("", "field-test", map[string]string{"unknown": "value"})
+	if err == nil {
+		t.Fatal("expected error for unknown field, got nil")
+	}
+}
+
+func TestStore_UpdateFields_NotFound_ReturnsErrNotFound(t *testing.T) {
+	_, store := setupStore(t)
+	err := store.UpdateFields("", "nonexistent-task", map[string]string{"status": "done"})
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
 
-func TestUpdateFields_BodyPreserved(t *testing.T) {
+func TestStore_UpdateFields_BodyPreserved(t *testing.T) {
 	_, store := setupStore(t)
-	tk := &Task{
-		Title:    "body-preserved",
-		Status:   StatusOpen,
-		Priority: PriorityMedium,
-		Body:     "## What\nThis body must survive the update.\n\n## Why\nBecause.\n",
+	tk := createTask(t, store, "20260304-auth", "Body preserved", "open", "medium", nil)
+
+	// Write a body into TASK.md manually.
+	taskPath := filepath.Join(tk.DirPath, taskFileName)
+	data, err := os.ReadFile(taskPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
 	}
-	if _, err := store.Save(tk, tk.Body); err != nil {
-		t.Fatalf("Save: %v", err)
+	withBody := string(data) + "\n## What\n\nThis body must survive the update.\n"
+	if err := os.WriteFile(taskPath, []byte(withBody), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
 	}
 
-	if err := store.UpdateFields("body-preserved", map[string]string{"status": "in_progress"}); err != nil {
+	if err := store.UpdateFields("", "body-preserved", map[string]string{"priority": "high"}); err != nil {
 		t.Fatalf("UpdateFields: %v", err)
 	}
 
-	got, err := store.Get("body-preserved")
+	updated, err := os.ReadFile(taskPath)
 	if err != nil {
-		t.Fatalf("Get after update: %v", err)
+		t.Fatalf("ReadFile after update: %v", err)
 	}
-	if !strings.Contains(got.Body, "This body must survive") {
-		t.Errorf("Body = %q, expected 'This body must survive'", got.Body)
+	if !strings.Contains(string(updated), "This body must survive the update") {
+		t.Error("body was lost after UpdateFields")
 	}
 }
 
-// --- Delete ------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Delete
+// ---------------------------------------------------------------------------
 
-func TestDelete_RemovesFile(t *testing.T) {
+func TestStore_Delete_RemovesTaskDir(t *testing.T) {
 	_, store := setupStore(t)
-	path := writeTaskFile(t, store, "to-delete", "open", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
+	tk := createTask(t, store, "20260304-auth", "Delete me", "open", "medium", nil)
+	dirPath := tk.DirPath
 
-	if err := store.Delete("to-delete"); err != nil {
+	deleted, err := store.Delete("", "delete-me")
+	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("expected file to be deleted, got: %v", err)
+	if deleted.Title != "Delete me" {
+		t.Errorf("deleted.Title = %q, want 'Delete me'", deleted.Title)
+	}
+
+	// Task directory must no longer exist.
+	if _, err := os.Stat(dirPath); !os.IsNotExist(err) {
+		t.Errorf("task dir %s should have been removed", dirPath)
 	}
 }
 
-func TestDelete_RemovesFileFromAnySubdir(t *testing.T) {
+func TestStore_Delete_TaskGoneFromList(t *testing.T) {
 	_, store := setupStore(t)
-	path := writeTaskFile(t, store, "done-delete", "done", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
+	createTask(t, store, "20260304-auth", "Keep me", "open", "medium", nil)
+	createTask(t, store, "20260304-auth", "Delete me", "open", "medium", nil)
 
-	if err := store.Delete("done-delete"); err != nil {
-		t.Fatalf("Delete from done/: %v", err)
-	}
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("expected file to be deleted from tasks/done/, got: %v", err)
-	}
-}
-
-func TestDelete_NotFound_ReturnsErrNotFound(t *testing.T) {
-	_, store := setupStore(t)
-	err := store.Delete("nonexistent")
-	if !errors.Is(err, ErrNotFound) {
-		t.Errorf("expected ErrNotFound, got %v", err)
-	}
-}
-
-func TestDelete_AmbiguousMatch_ReturnsErrAmbiguous(t *testing.T) {
-	_, store := setupStore(t)
-	writeTaskFile(t, store, "auth-login", "open", "medium", time.Date(2025, 2, 20, 0, 0, 0, 0, time.UTC))
-	writeTaskFile(t, store, "auth-signup", "open", "medium", time.Date(2025, 2, 21, 0, 0, 0, 0, time.UTC))
-
-	err := store.Delete("auth")
-	if !errors.Is(err, ErrAmbiguous) {
-		t.Errorf("expected ErrAmbiguous, got %v", err)
-	}
-}
-
-func TestDelete_TaskGoneFromList(t *testing.T) {
-	_, store := setupStore(t)
-	writeTaskFile(t, store, "delete-me", "open", "medium", time.Now())
-	writeTaskFile(t, store, "keep-me", "open", "medium", time.Now())
-
-	if err := store.Delete("delete-me"); err != nil {
+	if _, err := store.Delete("", "delete-me"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
@@ -683,169 +722,309 @@ func TestDelete_TaskGoneFromList(t *testing.T) {
 		t.Fatalf("List after delete: %v", err)
 	}
 	if len(tasks) != 1 {
-		t.Fatalf("expected 1 task after delete, got %d", len(tasks))
+		t.Fatalf("expected 1 task remaining, got %d", len(tasks))
 	}
-	if tasks[0].Title == "delete-me" {
-		t.Error("deleted task should not appear in List")
+	if tasks[0].Title == "Delete me" {
+		t.Error("deleted task still appears in List")
 	}
 }
 
-// --- Purge -------------------------------------------------------------------
-
-func TestPurge_DeletesAllWithStatus(t *testing.T) {
+func TestStore_Delete_NotFound_ReturnsErrNotFound(t *testing.T) {
 	_, store := setupStore(t)
-	writeTaskFile(t, store, "done-one", "done", "medium", time.Now())
-	writeTaskFile(t, store, "done-two", "done", "medium", time.Now())
-	writeTaskFile(t, store, "keep-open", "open", "medium", time.Now())
-
-	n, err := store.Purge(StatusDone)
-	if err != nil {
-		t.Fatalf("Purge: %v", err)
-	}
-	if n != 2 {
-		t.Errorf("expected 2 deleted, got %d", n)
-	}
-
-	remaining, err := store.List(Filter{})
-	if err != nil {
-		t.Fatalf("List after Purge: %v", err)
-	}
-	if len(remaining) != 1 || remaining[0].Title != "keep-open" {
-		t.Errorf("expected only 'keep-open' to remain, got %d tasks", len(remaining))
-	}
-}
-
-func TestPurge_EmptyStatus_ReturnsZero(t *testing.T) {
-	_, store := setupStore(t)
-	writeTaskFile(t, store, "open-task", "open", "medium", time.Now())
-
-	n, err := store.Purge(StatusDone) // no done tasks exist
-	if err != nil {
-		t.Fatalf("Purge on empty status: %v", err)
-	}
-	if n != 0 {
-		t.Errorf("expected 0 deleted, got %d", n)
-	}
-
-	// open task should be unaffected
-	tasks, _ := store.List(Filter{})
-	if len(tasks) != 1 {
-		t.Errorf("expected 1 remaining task, got %d", len(tasks))
-	}
-}
-
-func TestPurge_NoDirExists_ReturnsZero(t *testing.T) {
-	dir := t.TempDir()
-	cfg := config.Default("proj")
-	store := NewStore(dir, &cfg)
-
-	n, err := store.Purge(StatusCancelled)
-	if err != nil {
-		t.Fatalf("Purge on missing dir should not error: %v", err)
-	}
-	if n != 0 {
-		t.Errorf("expected 0, got %d", n)
-	}
-}
-
-func TestPurge_OnlyDeletesMatchingStatus(t *testing.T) {
-	_, store := setupStore(t)
-	writeTaskFile(t, store, "cancelled-task", "cancelled", "medium", time.Now())
-	writeTaskFile(t, store, "open-task", "open", "medium", time.Now())
-	writeTaskFile(t, store, "wip-task", "in_progress", "medium", time.Now())
-
-	n, err := store.Purge(StatusCancelled)
-	if err != nil {
-		t.Fatalf("Purge: %v", err)
-	}
-	if n != 1 {
-		t.Errorf("expected 1 deleted, got %d", n)
-	}
-
-	remaining, _ := store.List(Filter{})
-	if len(remaining) != 2 {
-		t.Errorf("expected 2 remaining tasks, got %d", len(remaining))
-	}
-	for _, task := range remaining {
-		if task.Status == StatusCancelled {
-			t.Errorf("cancelled task should have been purged, found %q", task.Title)
-		}
-	}
-}
-
-// --- ResolveSession ----------------------------------------------------------
-
-func TestResolveSession_ExactFilename(t *testing.T) {
-	dir, store := setupStore(t)
-	writeSessionFile(t, dir, "2025-02-20_auth-refactor.md")
-
-	got, err := store.ResolveSession("2025-02-20_auth-refactor.md")
-	if err != nil {
-		t.Fatalf("ResolveSession: %v", err)
-	}
-	if got != "2025-02-20_auth-refactor.md" {
-		t.Errorf("got %q, want '2025-02-20_auth-refactor.md'", got)
-	}
-}
-
-func TestResolveSession_PartialMatch(t *testing.T) {
-	dir, store := setupStore(t)
-	writeSessionFile(t, dir, "2025-02-20_auth-refactor.md")
-
-	got, err := store.ResolveSession("auth-refactor")
-	if err != nil {
-		t.Fatalf("ResolveSession partial: %v", err)
-	}
-	if got != "2025-02-20_auth-refactor.md" {
-		t.Errorf("got %q, want '2025-02-20_auth-refactor.md'", got)
-	}
-}
-
-func TestResolveSession_NotFound_ReturnsErrNotFound(t *testing.T) {
-	_, store := setupStore(t)
-
-	_, err := store.ResolveSession("nonexistent")
+	_, err := store.Delete("", "nonexistent-task")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
 
-func TestResolveSession_AmbiguousMatch_ReturnsErrAmbiguous(t *testing.T) {
-	dir, store := setupStore(t)
-	writeSessionFile(t, dir, "2025-02-20_auth-login.md")
-	writeSessionFile(t, dir, "2025-02-21_auth-signup.md")
+func TestStore_Delete_AmbiguousMatch_ReturnsErrAmbiguous(t *testing.T) {
+	_, store := setupStore(t)
+	createTask(t, store, "20260304-auth", "Ambiguous task", "open", "medium", nil)
+	createTask(t, store, "20260305-db", "Ambiguous task", "open", "medium", nil)
 
-	_, err := store.ResolveSession("auth")
+	_, err := store.Delete("", "ambiguous-task")
 	if !errors.Is(err, ErrAmbiguous) {
 		t.Errorf("expected ErrAmbiguous, got %v", err)
 	}
 }
 
-func TestResolveSession_NoSessionsDir_ReturnsErrNotFound(t *testing.T) {
+// ---------------------------------------------------------------------------
+// IsBlocked
+// ---------------------------------------------------------------------------
+
+func TestIsBlocked_NoDeps_ReturnsFalse(t *testing.T) {
+	t1 := &Task{Seq: 1, Status: StatusOpen, DependsOn: nil}
+	planTasks := []*Task{t1}
+	if IsBlocked(t1, planTasks) {
+		t.Error("task with no deps should not be blocked")
+	}
+}
+
+func TestIsBlocked_DepDone_ReturnsFalse(t *testing.T) {
+	dep := &Task{Seq: 1, Status: StatusDone}
+	blocked := &Task{Seq: 2, Status: StatusOpen, DependsOn: []int{1}}
+	planTasks := []*Task{dep, blocked}
+	if IsBlocked(blocked, planTasks) {
+		t.Error("task whose dep is done should not be blocked")
+	}
+}
+
+func TestIsBlocked_DepOpen_ReturnsTrue(t *testing.T) {
+	dep := &Task{Seq: 1, Status: StatusOpen}
+	blocked := &Task{Seq: 2, Status: StatusOpen, DependsOn: []int{1}}
+	planTasks := []*Task{dep, blocked}
+	if !IsBlocked(blocked, planTasks) {
+		t.Error("task whose dep is open should be blocked")
+	}
+}
+
+func TestIsBlocked_DepInProgress_ReturnsTrue(t *testing.T) {
+	dep := &Task{Seq: 1, Status: StatusInProgress}
+	blocked := &Task{Seq: 2, Status: StatusOpen, DependsOn: []int{1}}
+	planTasks := []*Task{dep, blocked}
+	if !IsBlocked(blocked, planTasks) {
+		t.Error("task whose dep is in_progress should be blocked")
+	}
+}
+
+func TestIsBlocked_UnknownDep_ReturnsTrue(t *testing.T) {
+	// Dep seq 99 does not exist in planTasks — treated as blocked.
+	blocked := &Task{Seq: 2, Status: StatusOpen, DependsOn: []int{99}}
+	if !IsBlocked(blocked, []*Task{blocked}) {
+		t.Error("task with unknown dep seq should be blocked")
+	}
+}
+
+func TestIsBlocked_MultipleDeps_AllDone_ReturnsFalse(t *testing.T) {
+	d1 := &Task{Seq: 1, Status: StatusDone}
+	d2 := &Task{Seq: 2, Status: StatusDone}
+	t3 := &Task{Seq: 3, Status: StatusOpen, DependsOn: []int{1, 2}}
+	if IsBlocked(t3, []*Task{d1, d2, t3}) {
+		t.Error("all deps done — should not be blocked")
+	}
+}
+
+func TestIsBlocked_MultipleDeps_OnePending_ReturnsTrue(t *testing.T) {
+	d1 := &Task{Seq: 1, Status: StatusDone}
+	d2 := &Task{Seq: 2, Status: StatusOpen}
+	t3 := &Task{Seq: 3, Status: StatusOpen, DependsOn: []int{1, 2}}
+	if !IsBlocked(t3, []*Task{d1, d2, t3}) {
+		t.Error("one dep still open — should be blocked")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CreateWalkthroughScaffold
+// ---------------------------------------------------------------------------
+
+func TestCreateWalkthroughScaffold_CreatesFile(t *testing.T) {
 	dir := t.TempDir()
-	cfg := config.Default("proj")
+	cfg := config.Default("test")
 	store := NewStore(dir, &cfg)
 
-	_, err := store.ResolveSession("anything")
-	if !errors.Is(err, ErrNotFound) {
-		t.Errorf("expected ErrNotFound for missing sessions dir, got %v", err)
+	taskDir := filepath.Join(dir, "task-dir")
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatal(err)
 	}
-}
 
-func TestResolveSession_CaseInsensitive(t *testing.T) {
-	dir, store := setupStore(t)
-	writeSessionFile(t, dir, "2025-02-20_AUTH-refactor.md")
+	tk := &Task{Title: "My Task", DirPath: taskDir}
+	if err := store.CreateWalkthroughScaffold(tk); err != nil {
+		t.Fatalf("CreateWalkthroughScaffold: %v", err)
+	}
 
-	got, err := store.ResolveSession("auth-refactor")
+	path := filepath.Join(taskDir, walkthroughFileName)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("ResolveSession case-insensitive: %v", err)
+		t.Fatalf("ReadFile: %v", err)
 	}
-	if got != "2025-02-20_AUTH-refactor.md" {
-		t.Errorf("got %q, want '2025-02-20_AUTH-refactor.md'", got)
+	content := string(data)
+
+	if !strings.Contains(content, "# Walkthrough: My Task") {
+		t.Errorf("expected title in scaffold, got: %q", content)
+	}
+	if !strings.Contains(content, "## What Was Done") {
+		t.Error("expected '## What Was Done' section")
+	}
+	if !strings.Contains(content, "## How It Was Done") {
+		t.Error("expected '## How It Was Done' section")
+	}
+	if !strings.Contains(content, "## Gotchas & Lessons Learned") {
+		t.Error("expected '## Gotchas & Lessons Learned' section")
+	}
+	if !strings.Contains(content, "## Reusable Patterns") {
+		t.Error("expected '## Reusable Patterns' section")
 	}
 }
 
-// --- generateID --------------------------------------------------------------
+func TestCreateWalkthroughScaffold_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default("test")
+	store := NewStore(dir, &cfg)
+
+	taskDir := filepath.Join(dir, "task-dir")
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-create with custom content.
+	path := filepath.Join(taskDir, walkthroughFileName)
+	custom := "# Custom content"
+	if err := os.WriteFile(path, []byte(custom), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tk := &Task{Title: "Any Task", DirPath: taskDir}
+	if err := store.CreateWalkthroughScaffold(tk); err != nil {
+		t.Fatalf("CreateWalkthroughScaffold: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != custom {
+		t.Errorf("existing WALKTHROUGH.md was overwritten; got %q", string(data))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// RebuildTaskIndex
+// ---------------------------------------------------------------------------
+
+func TestStore_RebuildTaskIndex_EmptyTasks_CreatesEmptyIndex(t *testing.T) {
+	dir, store := setupStore(t)
+	n, err := store.RebuildTaskIndex()
+	if err != nil {
+		t.Fatalf("RebuildTaskIndex: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0, got %d", n)
+	}
+	if _, err := os.Stat(TaskIndexFilePath(dir)); err != nil {
+		t.Errorf("index file should exist after RebuildTaskIndex: %v", err)
+	}
+}
+
+func TestStore_RebuildTaskIndex_IndexesAllTasks(t *testing.T) {
+	dir, store := setupStore(t)
+	createTask(t, store, "20260304-auth", "Task A", "open", "medium", nil)
+	createTask(t, store, "20260304-auth", "Task B", "done", "high", nil)
+	createTask(t, store, "20260305-db", "Task C", "in_progress", "low", nil)
+
+	// Truncate to force full rebuild.
+	if err := os.WriteFile(TaskIndexFilePath(dir), []byte{}, 0o644); err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+
+	n, err := store.RebuildTaskIndex()
+	if err != nil {
+		t.Fatalf("RebuildTaskIndex: %v", err)
+	}
+	if n != 3 {
+		t.Errorf("expected 3 tasks indexed, got %d", n)
+	}
+
+	entries, err := ReadAllTaskIndex(dir)
+	if err != nil {
+		t.Fatalf("ReadAllTaskIndex: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Errorf("expected 3 entries in index, got %d", len(entries))
+	}
+}
+
+func TestStore_RebuildTaskIndex_OverwritesExistingIndex(t *testing.T) {
+	dir, store := setupStore(t)
+
+	// Write a stale entry directly.
+	stale := TaskJSON{ID: "t-stale", Title: "stale task", Tags: []string{}, DependsOn: []int{}}
+	if err := AppendTaskIndex(dir, stale); err != nil {
+		t.Fatalf("AppendTaskIndex stale: %v", err)
+	}
+
+	// Create one real task.
+	createTask(t, store, "20260304-auth", "Real task", "open", "medium", nil)
+
+	n, err := store.RebuildTaskIndex()
+	if err != nil {
+		t.Fatalf("RebuildTaskIndex: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 real task indexed, got %d", n)
+	}
+
+	entries, err := ReadAllTaskIndex(dir)
+	if err != nil {
+		t.Fatalf("ReadAllTaskIndex: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry (stale overwritten), got %d", len(entries))
+	}
+	if entries[0].Title == "stale task" {
+		t.Error("stale entry should have been removed")
+	}
+}
+
+func TestStore_Create_AppendsToIndex(t *testing.T) {
+	dir, store := setupStore(t)
+	createTask(t, store, "20260304-auth", "Index task", "open", "medium", nil)
+
+	entries, err := ReadAllTaskIndex(dir)
+	if err != nil {
+		t.Fatalf("ReadAllTaskIndex: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry after Create, got %d", len(entries))
+	}
+	if entries[0].Title != "Index task" {
+		t.Errorf("Title = %q, want 'Index task'", entries[0].Title)
+	}
+}
+
+func TestStore_UpdateFields_RebuildsIndex(t *testing.T) {
+	dir, store := setupStore(t)
+	createTask(t, store, "20260304-auth", "Update index", "open", "medium", nil)
+
+	if err := store.UpdateFields("", "update-index", map[string]string{"status": "in_progress"}); err != nil {
+		t.Fatalf("UpdateFields: %v", err)
+	}
+
+	entries, err := ReadAllTaskIndex(dir)
+	if err != nil {
+		t.Fatalf("ReadAllTaskIndex: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].Status != StatusInProgress {
+		t.Errorf("Status = %q, want 'in_progress'", entries[0].Status)
+	}
+}
+
+func TestStore_Delete_RebuildsIndex(t *testing.T) {
+	dir, store := setupStore(t)
+	createTask(t, store, "20260304-auth", "Keep me", "open", "medium", nil)
+	createTask(t, store, "20260304-auth", "Delete me", "open", "medium", nil)
+
+	if _, err := store.Delete("", "delete-me"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	entries, err := ReadAllTaskIndex(dir)
+	if err != nil {
+		t.Fatalf("ReadAllTaskIndex: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry after delete, got %d", len(entries))
+	}
+	if entries[0].Title == "Delete me" {
+		t.Error("deleted task should not appear in index")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// generateID / sortByDateDesc
+// ---------------------------------------------------------------------------
 
 func TestGenerateTaskID_HasTPrefix(t *testing.T) {
 	id, err := generateID()
@@ -853,7 +1032,7 @@ func TestGenerateTaskID_HasTPrefix(t *testing.T) {
 		t.Fatalf("generateID: %v", err)
 	}
 	if !strings.HasPrefix(id, "t-") {
-		t.Errorf("ID = %q, want 't-' prefix", id)
+		t.Errorf("ID %q should have 't-' prefix", id)
 	}
 }
 
@@ -862,44 +1041,114 @@ func TestGenerateTaskID_CorrectLength(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generateID: %v", err)
 	}
-	// "t-" + 6 hex chars = 8 chars total
+	// "t-" (2) + 6 hex chars = 8
 	if len(id) != 8 {
-		t.Errorf("ID = %q, want length 8 ('t-' + 6 hex chars)", id)
+		t.Errorf("ID length = %d, want 8 (got %q)", len(id), id)
 	}
 }
 
 func TestGenerateTaskID_IsUnique(t *testing.T) {
-	ids := make(map[string]bool)
+	seen := make(map[string]bool)
 	for i := 0; i < 20; i++ {
 		id, err := generateID()
 		if err != nil {
 			t.Fatalf("generateID: %v", err)
 		}
-		if ids[id] {
+		if seen[id] {
 			t.Errorf("duplicate ID generated: %q", id)
 		}
-		ids[id] = true
+		seen[id] = true
 	}
 }
 
-// --- sortByDateDesc ----------------------------------------------------------
-
 func TestSortByDateDesc_Tasks(t *testing.T) {
+	older := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	newer := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
 	tasks := []*Task{
-		{Title: "a", Date: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)},
-		{Title: "c", Date: time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)},
-		{Title: "b", Date: time.Date(2025, 2, 1, 0, 0, 0, 0, time.UTC)},
+		{Title: "old", Date: older},
+		{Title: "new", Date: newer},
 	}
 	sortByDateDesc(tasks)
-	if tasks[0].Title != "c" || tasks[1].Title != "b" || tasks[2].Title != "a" {
-		t.Errorf("unexpected order: %v %v %v", tasks[0].Title, tasks[1].Title, tasks[2].Title)
+	if tasks[0].Title != "new" {
+		t.Errorf("expected 'new' first, got %q", tasks[0].Title)
 	}
 }
 
 func TestSortByDateDesc_SingleElement(t *testing.T) {
 	tasks := []*Task{{Title: "only", Date: time.Now()}}
 	sortByDateDesc(tasks) // should not panic
-	if tasks[0].Title != "only" {
-		t.Errorf("single element lost after sort")
+	if len(tasks) != 1 {
+		t.Error("single element should survive sort")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// parseSeqPrefix
+// ---------------------------------------------------------------------------
+
+func TestParseSeqPrefix_Valid(t *testing.T) {
+	cases := []struct {
+		input string
+		want  int
+	}{
+		{"001-add-jwt", 1},
+		{"010-refactor", 10},
+		{"100-big-task", 100},
+		{"002-setup", 2},
+	}
+	for _, tc := range cases {
+		got := parseSeqPrefix(tc.input)
+		if got != tc.want {
+			t.Errorf("parseSeqPrefix(%q) = %d, want %d", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestParseSeqPrefix_Invalid(t *testing.T) {
+	cases := []string{"no-prefix", "-no-leading", "abc-task", ""}
+	for _, s := range cases {
+		if n := parseSeqPrefix(s); n != 0 {
+			t.Errorf("parseSeqPrefix(%q) = %d, want 0", s, n)
+		}
+	}
+}
+
+// --- depends_on seq validation (§8.4) ----------------------------------------
+
+func TestCreate_DependsOn_NonExistentSeq_Error(t *testing.T) {
+	dir, store := setupStore(t)
+	_ = dir
+
+	// No tasks exist yet; seq 1 does not exist.
+	tk := &Task{
+		Title:     "Dependent task",
+		Plan:      "test-plan",
+		DependsOn: []int{1},
+	}
+	_, err := store.Create(tk)
+	if err == nil {
+		t.Fatal("expected error for non-existent depends_on seq, got nil")
+	}
+	if !strings.Contains(err.Error(), "seq 1") {
+		t.Errorf("expected 'seq 1' in error message, got: %v", err)
+	}
+}
+
+func TestCreate_DependsOn_ValidSeq_Succeeds(t *testing.T) {
+	dir, store := setupStore(t)
+	_ = dir
+
+	// Create task with seq 1.
+	createTask(t, store, "test-plan", "First task", "open", "medium", nil)
+
+	// Now create task depending on seq 1 — should succeed.
+	tk := &Task{
+		Title:     "Second task",
+		Plan:      "test-plan",
+		DependsOn: []int{1},
+	}
+	_, err := store.Create(tk)
+	if err != nil {
+		t.Errorf("expected no error for valid depends_on seq, got: %v", err)
 	}
 }

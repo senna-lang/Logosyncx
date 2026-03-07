@@ -15,268 +15,277 @@ import (
 // usageMD is the content written to .logosyncx/USAGE.md on logos init.
 const usageMD = `# Logosyncx Usage for AI Agents
 
-You have access to the ` + "`logos`" + ` CLI for managing session context.
+You have access to the ` + "`logos`" + ` CLI for managing plan and task context.
 ` + "`logos`" + ` is a shell binary — call it via terminal/shell commands.
 
 ---
 
 ## MANDATORY Triggers
 
-The following are **not optional**. When any condition below occurs, you MUST run the corresponding command.
-
 | Condition | You MUST run |
 |---|---|
-| Starting any work session | ` + "`logos ls --json`" + ` (always, before doing anything else) |
-| User says "save this session", "log this", "記録して", "セッションを保存して" | ` + "`logos save --topic \"...\" --section \"Summary=...\" ...`" + ` |
-| User says "make that a task", "add a TODO", "タスクにして", "issueにして" | ` + "`logos task create --title \"...\" --section \"What=...\" ...`" + ` |
-| User says "continue from last time", "前回の続き", "show past context" | ` + "`logos ls --json`" + ` then ` + "`logos refer --name <name> --summary`" + ` |
-| User mentions a past feature, decision, or discussion | ` + "`logos ls --json`" + ` and check excerpts for relevance |
+| Starting any work session | ` + "`logos ls --json`" + ` (check past plans before doing anything) |
+| User says "save this plan", "log this", "記録して" | ` + "`logos save --topic \"...\"`" + ` then write body with Write tool |
+| User says "make that a task", "add a TODO", "タスクにして" | ` + "`logos task create --plan <name> --title \"...\"`" + ` then write body with Write tool |
+| User says "continue from last time", "前回の続き" | ` + "`logos ls --json`" + ` then ` + "`logos refer --name <name> --summary`" + ` |
+| User mentions a past plan or decision | ` + "`logos ls --json`" + ` and check excerpts for relevance |
 
-> **Never say "I can't save sessions" or "I don't have access to logos."**
+> **Never say "I can't save plans" or "I don't have access to logos."**
 > The ` + "`logos`" + ` binary is installed and available via shell. Always use it.
 
-### Syntax rules (apply to every command)
+### Agent contract for writing document bodies
 
-- **Always use flags** — never pass positional arguments.
-- **Section content via ` + "`--section`" + ` only** — ` + "`--body`" + `, ` + "`--body-stdin`" + `, and ` + "`--description`" + ` do not exist.
-- All section names must be defined in ` + "`.logosyncx/config.json`" + `.
+Before writing any document body (plan, task, knowledge), you MUST:
+
+1. Read the corresponding template from ` + "`.logosyncx/templates/`" + `.
+2. Use the template's section structure as the basis for the document.
+3. Write the body **directly into the file** using the Write tool — not via a CLI flag.
+
+The CLI produces a frontmatter scaffold only. You fill the body.
 
 ---
 
 ## Workflow for finding relevant context
 
-1. Run ` + "`logos ls --json`" + ` to get all sessions with excerpts
-2. Read the ` + "`topic`" + `, ` + "`tags`" + `, and ` + "`excerpt`" + ` fields to judge relevance yourself
-3. Run ` + "`logos refer --name <filename> --summary`" + ` on relevant sessions to get details
+1. Run ` + "`logos ls --json`" + ` to get all plans with excerpts
+2. Read ` + "`topic`" + `, ` + "`tags`" + `, and ` + "`excerpt`" + ` fields to judge relevance yourself
+3. Run ` + "`logos refer --name <filename> --summary`" + ` on relevant plans to get details
 4. If you want to narrow down by keyword first, use ` + "`logos search --keyword <keyword>`" + `
 
-## Workflow for saving context
+## Workflow for saving a plan
 
 ` + "```" + `
-logos save --topic "short description of the session" \
-           --tag go --tag cli \
-           --agent claude-code \
-           --section "Summary=What happened in this session." \
-           --section "Key Decisions=- Decision one"
-` + "```" + `
+# 1. Scaffold the plan file
+logos save --topic "short description" --tag go --tag cli --agent claude-code
 
-For longer content, use a variable:
-` + "```" + `
-logos save --topic "short description" \
-           --section "Summary=Implemented the auth flow. Chose JWT over sessions because of stateless requirements." \
-           --section "Key Decisions=- JWT over sessions\n- RS256 algorithm"
+# 2. Read the plan template
+cat .logosyncx/templates/plan.md
+
+# 3. Write the plan body directly into the file
+# (use the Write tool to fill in sections)
 ` + "```" + `
 
 ## Commands
 
-### List sessions
+### List plans
 ` + "```" + `
-logos ls                    # human-readable table
-logos ls --tag auth         # filter by tag
-logos ls --since 2025-02-01 # filter by date
-logos ls --json             # structured output with excerpts (preferred for agents)
+logos ls                       # human-readable table
+logos ls --tag auth            # filter by tag
+logos ls --since 2026-01-01    # filter by date
+logos ls --blocked             # show only blocked plans
+logos ls --json                # structured output with excerpts (preferred for agents)
 ` + "```" + `
 
-### Read a session
+### Read a plan
 ` + "```" + `
 logos refer --name <filename>            # full content
 logos refer --name <partial-name>        # partial match
 logos refer --name <filename> --summary  # key sections only (saves tokens, prefer this)
 ` + "```" + `
 
-### Save a session
+### Save a plan
 ` + "```" + `
-# topic only, no body sections
-logos save --topic "..."
-
-# with section content (--section is the only way to add body content)
-logos save --topic "..." --section "Summary=text"
-logos save --topic "..." \
-           --tag go --tag cli \
-           --agent claude-code \
-           --related 2026-01-01_previous.md \
-           --task <partial-task-name> \
-           --section "Summary=What happened." \
-           --section "Key Decisions=- Decision A"
+logos save --topic "short description"
+logos save --topic "..." --tag go --tag cli --agent claude-code --depends-on 20260304-auth.md
 ` + "```" + `
-
-Use ` + "`--task`" + ` to link this session to one or more existing tasks (partial name match, repeatable).
-The resolved task filenames are stored in the session's ` + "`tasks:`" + ` frontmatter field.
-
-Allowed section names are defined in ` + "`.logosyncx/config.json`" + ` under ` + "`sessions.sections`" + `.
-Unknown section names are rejected with an error.
 
 ### Search (keyword narrowing)
 ` + "```" + `
-logos search --keyword "keyword"              # search on topic, tags, and excerpt
+logos search --keyword "keyword"
 logos search --keyword "auth" --tag security
 ` + "```" + `
 
-## Check uncommitted changes
-
-` + "```" + `
-logos status
-` + "```" + `
-
-Shows all files under ` + "`.logosyncx/`" + ` that are staged, unstaged, or untracked —
-grouped by state. Useful for agents to confirm that ` + "`logos save`" + ` or
-` + "`logos task create`" + ` actually persisted before ending a session.
-
-Output example:
-` + "```" + `
-Staged (ready to commit):
-  (added)      sessions/2026-02-28_my-session.md
-
-Untracked (not staged):
-  (new)        tasks/open/2026-02-28_my-task.md
-
-Run ` + "`git add .logosyncx/ && git commit`" + ` to commit the above.
-` + "```" + `
-
-This command is informational and never modifies any file or git state.
-
-## Sync index
-
-If you manually edit, add, or delete session or task files, run:
-
+### Sync index
 ` + "```" + `
 logos sync
 ` + "```" + `
 
-This rebuilds both ` + "`index.jsonl`" + ` and ` + "`task-index.jsonl`" + ` from the filesystem so that
-` + "`logos ls`" + ` and ` + "`logos task ls`" + ` return accurate results.
+Rebuilds the plan and task indexes from the filesystem.
 
-## Archive stale sessions (GC)
-
-Over time sessions accumulate. Use ` + "`logos gc`" + ` to move stale sessions to
-` + "`sessions/archive/`" + ` without permanently deleting them.
-
+### Garbage collect stale plans
 ` + "```" + `
-logos gc --dry-run                  # preview candidates, do nothing
-logos gc                            # move stale sessions to sessions/archive/
-logos gc --linked-days 14           # override: archive linked sessions after 14 days
-logos gc --orphan-days 60           # override: archive orphan sessions after 60 days
-logos gc purge                      # confirm and permanently delete archived sessions
-logos gc purge --force              # skip confirmation
+logos gc --dry-run
+logos gc
+logos gc purge --force
 ` + "```" + `
 
-A session is a **strong candidate** (default: 30 days) when all its linked tasks are
-` + "`done`" + ` or ` + "`cancelled`" + ` and at least ` + "`--linked-days`" + ` have passed since the last task completed.
-
-A session is a **weak candidate** (default: 90 days) when it has no linked tasks and is
-older than ` + "`--orphan-days`" + `.
-
-Sessions with at least one linked task still ` + "`open`" + ` or ` + "`in_progress`" + ` are **protected** and
-will never be archived automatically.
-
-> Tip: link sessions to tasks via ` + "`logos save --task <partial>`" + ` so GC can use task
-> completion as the archival signal instead of raw age.
-
-## Token strategy
-- Use ` + "`logos ls --json`" + ` first to scan all sessions cheaply via excerpts
-- Use ` + "`--summary`" + ` on ` + "`refer`" + ` unless you need the full conversation log
-- Only use full ` + "`refer`" + ` when the summary is insufficient
+---
 
 ## Tasks
 
-Action items, implementation proposals, and TODO items that arise during a session can be saved as tasks.
-Tasks are always linked to a session — the session serves as the rationale for why the task exists.
-
-### When to create a task
-
-- When the user says "make that a task", "do that later", or "add a TODO"
-- When you propose an implementation plan, improvement, or refactoring idea
-- After saving a session, when you want to preserve a specific proposal for later
+Tasks are work items linked to a plan. Each task has a ` + "`TASK.md`" + ` (what to do)
+and optionally a ` + "`WALKTHROUGH.md`" + ` (what actually happened — filled after completion).
 
 ### Workflow for creating a task
 
 ` + "```" + `
-logos task create --title "Implement the thing" \
-                  --priority high \
-                  --tag go --tag cli \
-                  --session <partial-session-name> \
-                  --section "What=Add X so that Y." \
-                  --section "Why=Required for the new auth flow."
+# 1. Scaffold the task
+logos task create --plan <plan-filename> --title "Implement the thing" --priority high --tag go
+
+# 2. Read the task template
+cat .logosyncx/templates/task.md
+
+# 3. Write TASK.md body directly using the Write tool
 ` + "```" + `
 
-Allowed section names are defined in ` + "`.logosyncx/config.json`" + ` under ` + "`tasks.sections`" + `.
-Unknown section names are rejected with an error.
+### Workflow for completing a task
 
-> All fields are passed as flags — never use positional arguments.
-> Section content must be provided via ` + "`--section \"Name=content\"`" + `. There is no ` + "`--description`" + ` flag.
+` + "```" + `
+# 1. Mark task done
+logos task update --plan <plan-filename> --name <task-name> --status done
 
-### Workflow for checking tasks
+# 2. Write WALKTHROUGH.md (use Write tool)
+logos task walkthrough --plan <plan-filename> --name <task-name>
+` + "```" + `
 
-1. Run ` + "`logos task ls --status open --json`" + ` to get a list of outstanding tasks
-2. Read ` + "`title`" + ` and ` + "`excerpt`" + ` to judge which tasks are relevant
-3. Run ` + "`logos task refer --name <name> --with-session`" + ` to get full task details plus the linked session summary
-
-### Commands
+### Task commands
 
 ` + "```" + `
 # List tasks
-logos task ls                              # human-readable table
-logos task ls --status open               # filter by status (open, in_progress, done, cancelled)
-logos task ls --session <name>            # filter by linked session
-logos task ls --priority high             # filter by priority (high, medium, low)
-logos task ls --tag <tag>                 # filter by tag
-logos task ls --json                      # structured output with excerpts (preferred for agents)
+logos task ls                                     # all tasks
+logos task ls --plan <plan-filename>              # tasks for a specific plan
+logos task ls --status open                       # filter by status
+logos task ls --blocked                           # show only blocked tasks
+logos task ls --json                              # structured output (preferred for agents)
 
 # Read a task
-logos task refer --name <name>                   # full content
-logos task refer --name <name> --summary         # key sections only (saves tokens)
-logos task refer --name <name> --with-session    # append linked session summary
+logos task refer --name <name>                    # full TASK.md content
+logos task refer --name <name> --summary          # key sections only (saves tokens)
 
 # Create a task
-logos task create --title "..."                                        # title only, empty body
-logos task create --title "..." --section "What=..." --priority high --tag <tag>
-logos task create --title "..." --session <name>                       # link to a session
-logos task create --title "..." \
-                  --section "What=Implement X." \
-                  --section "Why=Needed for Y." \
-                  --section "Checklist=- [ ] step one\n- [ ] step two"
+logos task create --plan <plan-filename> --title "..."
+logos task create --plan <plan-filename> --title "..." --priority high --tag go --depends-on 1
 
 # Update a task
-logos task update --name <name> --status in_progress        # moves file to tasks/in_progress/
-logos task update --name <name> --status done               # moves file to tasks/done/
-logos task update --name <name> --priority high
-logos task update --name <name> --assignee <assignee>
-logos task update --name <name> --add-session <partial>     # link a session to this task
+logos task update --plan <plan-filename> --name <name> --status in_progress
+logos task update --plan <plan-filename> --name <name> --status done
+logos task update --plan <plan-filename> --name <name> --priority high
 
-# Delete a single task
-logos task delete --name <name>           # prompts for confirmation
-logos task delete --name <name> --force   # skip confirmation
-
-# Bulk-delete all tasks with a given status
-logos task purge --status done            # shows list + confirmation prompt
-logos task purge --status done --force    # skip confirmation
-logos task purge --status cancelled --force
-
-# Search tasks
-logos task search --keyword "keyword"                    # search title, tags, and excerpt
-logos task search --keyword "keyword" --status open
-logos task search --keyword "keyword" --tag <tag>
+# Open walkthrough scaffold
+logos task walkthrough --plan <plan-filename> --name <name>
 ` + "```" + `
+
+---
+
+## Distill
+
+After all tasks in a plan are done, distil the work into reusable knowledge:
+
+` + "```" + `
+# Preview — no writes
+logos distill --plan <plan-filename> --dry-run
+
+# Write knowledge scaffold
+logos distill --plan <plan-filename>
+
+# Read the knowledge template, then fill in the knowledge file using the Write tool
+cat .logosyncx/templates/knowledge.md
+` + "```" + `
+
+---
+
+## Token strategy
+- Use ` + "`logos ls --json`" + ` first to scan all plans cheaply via excerpts
+- Use ` + "`--summary`" + ` on ` + "`refer`" + ` unless you need the full plan body
+- Only use full ` + "`refer`" + ` when the summary is insufficient
 `
 
 // agentsLine is appended to AGENTS.md (or CLAUDE.md) by logos init.
 const agentsLine = "\n## Logosyncx\n\n" +
-	"Use `logos` CLI for session context management.\n" +
+	"Use `logos` CLI for plan and task management.\n" +
 	"Full reference: `.logosyncx/USAGE.md`\n\n" +
 	"**MANDATORY triggers:**\n\n" +
-	"- **Start of every session** → `logos ls --json` (check past context before doing anything)\n" +
-	"- User says \"save this session\" / \"記録して\" → `logos save --topic \"...\" --section \"Summary=...\" --section \"Key Decisions=...\"`\n" +
-	"- User says \"make that a task\" / \"タスクにして\" → `logos task create --title \"...\" --section \"What=...\"`\n" +
+	"- **Start of every session** → `logos ls --json` (check past plans before doing anything)\n" +
+	"- User says \"save this plan\" / \"記録して\" → `logos save --topic \"...\"` then write body with Write tool\n" +
+	"- User says \"make that a task\" / \"タスクにして\" → `logos task create --plan <name> --title \"...\"`\n" +
 	"- User says \"continue from last time\" / \"前回の続き\" → `logos ls --json` then `logos refer --name <name> --summary`\n\n" +
-	"Never use positional arguments. Never use `--body` or `--description`. All body content goes in `--section \"Name=content\"` flags.\n"
+	"Always read the template before writing any document body. Write bodies directly into the file using the Write tool.\n"
+
+// defaultPlanTemplate is written to templates/plan.md on logos init.
+const defaultPlanTemplate = `## Background
+
+<!-- Why does this work exist? What problem are we solving?
+     Dump everything — context, constraints, user needs.
+     This section is used as the plan excerpt in ` + "`logos ls`" + `. -->
+
+## Spec
+
+<!-- Crystallise the specification through dialogue.
+     What exactly will be built or changed? What are the boundaries? -->
+
+## Key Decisions
+
+<!-- Significant design decisions and their rationale.
+     Format: "Decision: <what>. Rationale: <why>." -->
+
+## Notes
+
+<!-- Miscellaneous notes, links, risks, or open questions. -->
+`
+
+// defaultTaskTemplate is written to templates/task.md on logos init.
+const defaultTaskTemplate = `## What
+
+<!-- One paragraph describing what this task delivers.
+     Be concrete. This is used as the task excerpt in ` + "`logos task ls`" + `. -->
+
+## Why
+
+<!-- Why does this task need to exist?
+     Link back to the plan's Spec if helpful. -->
+
+## Scope
+
+<!-- Files and directories this task touches:
+- ` + "`path/to/file.go`" + `
+- ` + "`path/to/file_test.go`" + `
+
+What is explicitly OUT of scope: -->
+
+## Checklist
+
+<!-- Step-by-step implementation checklist.
+- [ ] Step one
+- [ ] Step two
+- [ ] Tests added (Red → Green → Refactor)
+- [ ] ` + "`go test ./...`" + ` passes -->
+
+## Notes
+
+<!-- Supplementary notes, gotchas known upfront, references. -->
+`
+
+// defaultKnowledgeTemplate is written to templates/knowledge.md on logos init.
+const defaultKnowledgeTemplate = `## Summary
+
+<!-- Concise summary of what was learned across all tasks.
+     This is used as the knowledge excerpt in future lookups. -->
+
+## Key Learnings
+
+<!-- Most important insights from the walkthroughs.
+     Focus on what would change how you approach similar work next time. -->
+
+## Reusable Patterns
+
+<!-- Code snippets, architectural patterns, or conventions worth reusing.
+     Make each pattern self-contained with enough context. -->
+
+## Gotchas
+
+<!-- Surprising behaviour, edge cases, or mistakes to avoid.
+     Format: "Gotcha: <what>. Fix: <how to handle it>." -->
+
+## Source Walkthroughs
+
+<!-- Auto-populated by logos distill. Do not edit. -->
+`
 
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize Logosyncx in the current directory",
-	Long: `Create .logosyncx/ with config.json and USAGE.md.
+	Long: `Create .logosyncx/ with plans/, knowledge/, templates/, config.json and USAGE.md.
 Append a reference line to AGENTS.md (or CLAUDE.md if present).
-The session and task body structure is configured in config.json under
-"save.sections" and "tasks.sections" respectively.
 Exits with an error if the project has already been initialized.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runInit()
@@ -300,24 +309,34 @@ func runInit() error {
 		return errors.New("already initialized: .logosyncx/ already exists")
 	}
 
-	// 1. Create directory structure.
-	sessionsDir := filepath.Join(logosyncxDir, "sessions")
-	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
-		return fmt.Errorf("create sessions directory: %w", err)
-	}
-
-	tasksDir := filepath.Join(logosyncxDir, "tasks")
-	for _, statusDir := range []string{"open", "in_progress", "done", "cancelled"} {
-		if err := os.MkdirAll(filepath.Join(tasksDir, statusDir), 0o755); err != nil {
-			return fmt.Errorf("create tasks/%s directory: %w", statusDir, err)
+	// 1. Create v2 directory structure.
+	for _, dir := range []string{
+		filepath.Join(logosyncxDir, "plans", "archive"),
+		filepath.Join(logosyncxDir, "knowledge"),
+		filepath.Join(logosyncxDir, "templates"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create directory %s: %w", dir, err)
 		}
 	}
 
-	// 2. Write config.json with defaults.
+	// 2. Write default template files.
+	templates := map[string]string{
+		"plan.md":      defaultPlanTemplate,
+		"task.md":      defaultTaskTemplate,
+		"knowledge.md": defaultKnowledgeTemplate,
+	}
+	for name, content := range templates {
+		path := filepath.Join(logosyncxDir, "templates", name)
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			return fmt.Errorf("write templates/%s: %w", name, err)
+		}
+	}
+
+	// 3. Write config.json with defaults.
 	projectName := filepath.Base(cwd)
 	cfg := config.Default(projectName)
 
-	// Detect which agents file to use and record it in config.
 	agentsFile := detectAgentsFile(cwd)
 	cfg.AgentsFile = agentsFile
 
@@ -325,13 +344,13 @@ func runInit() error {
 		return fmt.Errorf("write config.json: %w", err)
 	}
 
-	// 3. Write USAGE.md.
+	// 4. Write USAGE.md.
 	usagePath := filepath.Join(logosyncxDir, "USAGE.md")
 	if err := os.WriteFile(usagePath, []byte(usageMD), 0o644); err != nil {
 		return fmt.Errorf("write USAGE.md: %w", err)
 	}
 
-	// 4. Append reference line to agents file.
+	// 5. Append reference line to agents file.
 	agentsPath := filepath.Join(cwd, agentsFile)
 	if err := appendAgentsLine(agentsPath); err != nil {
 		return fmt.Errorf("update %s: %w", agentsFile, err)
@@ -339,15 +358,16 @@ func runInit() error {
 
 	fmt.Printf("✓ Initialized Logosyncx in %s\n", cwd)
 	fmt.Printf("  Created  .logosyncx/\n")
+	fmt.Printf("  Created  .logosyncx/plans/\n")
+	fmt.Printf("  Created  .logosyncx/knowledge/\n")
+	fmt.Printf("  Created  .logosyncx/templates/\n")
 	fmt.Printf("  Created  .logosyncx/config.json\n")
 	fmt.Printf("  Created  .logosyncx/USAGE.md\n")
-	fmt.Printf("  Created  .logosyncx/sessions/\n")
-	fmt.Printf("  Created  .logosyncx/tasks/{open,in_progress,done,cancelled}/\n")
 	fmt.Printf("  Updated  %s\n", agentsFile)
 	fmt.Println()
 	fmt.Println("Next steps:")
 	fmt.Printf("  1. Commit .logosyncx/ to git\n")
-	fmt.Printf("  2. Run `logos save --file <path>` to save your first session\n")
+	fmt.Printf("  2. Run `logos save --topic <topic>` to save your first plan\n")
 
 	return nil
 }

@@ -8,8 +8,43 @@ import (
 	"time"
 
 	"github.com/senna-lang/logosyncx/pkg/index"
-	"github.com/senna-lang/logosyncx/pkg/session"
+	"github.com/senna-lang/logosyncx/pkg/plan"
 )
+
+// writeSyncPlan is a helper that writes a plan file to projectRoot/plans/
+// including the Body field (unlike plan.Write which is scaffold-only).
+func writeSyncPlan(t *testing.T, projectRoot string, p plan.Plan) {
+	t.Helper()
+	plansDir := filepath.Join(projectRoot, ".logosyncx", "plans")
+	if err := os.MkdirAll(plansDir, 0o755); err != nil {
+		t.Fatalf("mkdir plans: %v", err)
+	}
+	data, err := plan.Marshal(p)
+	if err != nil {
+		t.Fatalf("plan.Marshal: %v", err)
+	}
+	if p.Body != "" {
+		data = append(data, []byte(p.Body)...)
+	}
+	path := filepath.Join(plansDir, plan.FileName(p))
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("WriteFile plan: %v", err)
+	}
+}
+
+// makeSyncPlan returns a minimal plan for sync tests.
+func makeSyncPlan(id, topic string, date time.Time) plan.Plan {
+	return plan.Plan{
+		ID:       id,
+		Date:     &date,
+		Topic:    topic,
+		Tags:     []string{},
+		Agent:    "claude-code",
+		Related:  []string{},
+		TasksDir: ".logosyncx/tasks/" + topic,
+		Body:     "## Background\n" + topic + " plan.\n",
+	}
+}
 
 // --- runSync: not initialized ------------------------------------------------
 
@@ -29,7 +64,7 @@ func TestSync_NotInitialized_ReturnsError(t *testing.T) {
 	}
 }
 
-// --- runSync: empty sessions -------------------------------------------------
+// --- runSync: empty plans ----------------------------------------------------
 
 func TestSync_EmptySessions_CreatesEmptyIndex(t *testing.T) {
 	dir := setupInitedProject(t)
@@ -46,44 +81,20 @@ func TestSync_EmptySessions_CreatesEmptyIndex(t *testing.T) {
 		t.Errorf("expected index.jsonl to exist after sync, got: %v", err)
 	}
 
-	// Output should mention 0 sessions.
-	if !strings.Contains(out, "0 sessions indexed") {
-		t.Errorf("expected '0 sessions indexed' in output, got: %q", out)
+	if !strings.Contains(out, "0 plans indexed") {
+		t.Errorf("expected '0 plans indexed' in output, got: %q", out)
 	}
 }
 
-// --- runSync: with sessions --------------------------------------------------
+// --- runSync: with plans -----------------------------------------------------
 
 func TestSync_IndexesSessions(t *testing.T) {
 	dir := setupInitedProject(t)
 
-	date := time.Date(2025, 2, 20, 10, 0, 0, 0, time.UTC)
+	date := time.Date(2026, 3, 4, 10, 0, 0, 0, time.UTC)
 	dateMinus1 := date.Add(-24 * time.Hour)
-	sessions := []session.Session{
-		{
-			ID:      "id1",
-			Date:    &date,
-			Topic:   "auth-flow",
-			Tags:    []string{"auth", "jwt"},
-			Agent:   "claude-code",
-			Related: []string{},
-			Body:    "## Summary\nJWT authentication decisions.\n",
-		},
-		{
-			ID:      "id2",
-			Date:    &dateMinus1,
-			Topic:   "db-schema",
-			Tags:    []string{"postgres"},
-			Agent:   "claude-code",
-			Related: []string{},
-			Body:    "## Summary\nPostgreSQL schema design.\n",
-		},
-	}
-	for _, s := range sessions {
-		if _, err := session.Write(dir, s); err != nil {
-			t.Fatalf("session.Write: %v", err)
-		}
-	}
+	writeSyncPlan(t, dir, makeSyncPlan("id1", "auth-flow", date))
+	writeSyncPlan(t, dir, makeSyncPlan("id2", "db-schema", dateMinus1))
 
 	out := captureOutput(t, func() {
 		if err := runSync(); err != nil {
@@ -91,8 +102,8 @@ func TestSync_IndexesSessions(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(out, "2 sessions indexed") {
-		t.Errorf("expected '2 sessions indexed' in output, got: %q", out)
+	if !strings.Contains(out, "2 plans indexed") {
+		t.Errorf("expected '2 plans indexed' in output, got: %q", out)
 	}
 
 	entries, err := index.ReadAll(dir)
@@ -115,8 +126,8 @@ func TestSync_PrintsRebuildingMessage(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(out, "Rebuilding session index") {
-		t.Errorf("expected 'Rebuilding session index' in output, got: %q", out)
+	if !strings.Contains(out, "Rebuilding plan index") {
+		t.Errorf("expected 'Rebuilding plan index' in output, got: %q", out)
 	}
 }
 
@@ -139,32 +150,20 @@ func TestSync_PrintsDoneMessage(t *testing.T) {
 func TestSync_OverwritesStaleIndex(t *testing.T) {
 	dir := setupInitedProject(t)
 
-	// Write a stale entry directly into the index.
 	stale := index.Entry{
-		ID:      "stale-id",
-		Topic:   "stale-topic",
-		Tags:    []string{},
-		Related: []string{},
-		Date:    time.Now(),
+		ID:        "stale-id",
+		Topic:     "stale-topic",
+		Tags:      []string{},
+		Related:   []string{},
+		DependsOn: []string{},
+		Date:      time.Now(),
 	}
 	if err := index.Append(dir, stale); err != nil {
 		t.Fatalf("Append stale entry: %v", err)
 	}
 
-	// Write one real session.
-	realDate := time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)
-	s := session.Session{
-		ID:      "real1",
-		Date:    &realDate,
-		Topic:   "real-topic",
-		Tags:    []string{},
-		Agent:   "claude-code",
-		Related: []string{},
-		Body:    "## Summary\nReal session.\n",
-	}
-	if _, err := session.Write(dir, s); err != nil {
-		t.Fatalf("session.Write: %v", err)
-	}
+	realDate := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	writeSyncPlan(t, dir, makeSyncPlan("real1", "real-topic", realDate))
 
 	if err := runSync(); err != nil {
 		t.Fatalf("runSync failed: %v", err)
@@ -190,19 +189,18 @@ func TestSync_OverwritesStaleIndex(t *testing.T) {
 func TestSync_IndexEntry_HasCorrectFields(t *testing.T) {
 	dir := setupInitedProject(t)
 
-	date := time.Date(2025, 4, 10, 9, 0, 0, 0, time.UTC)
-	s := session.Session{
-		ID:      "abc123",
-		Date:    &date,
-		Topic:   "field-check",
-		Tags:    []string{"go", "testing"},
-		Agent:   "claude-code",
-		Related: []string{"2025-04-01_prev.md"},
-		Body:    "## Summary\nChecking all index fields are populated correctly.\n",
+	date := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
+	p := plan.Plan{
+		ID:       "abc123",
+		Date:     &date,
+		Topic:    "field-check",
+		Tags:     []string{"go", "testing"},
+		Agent:    "claude-code",
+		Related:  []string{"20260401-prev.md"},
+		TasksDir: ".logosyncx/tasks/20260410-field-check",
+		Body:     "## Background\nChecking all index fields are populated correctly.\n",
 	}
-	if _, err := session.Write(dir, s); err != nil {
-		t.Fatalf("session.Write: %v", err)
-	}
+	writeSyncPlan(t, dir, p)
 
 	if err := runSync(); err != nil {
 		t.Fatalf("runSync failed: %v", err)
@@ -245,24 +243,12 @@ func TestSync_IndexEntry_HasCorrectFields(t *testing.T) {
 func TestSync_Idempotent(t *testing.T) {
 	dir := setupInitedProject(t)
 
-	idemDate := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
-	s := session.Session{
-		ID:      "idem1",
-		Date:    &idemDate,
-		Topic:   "idempotent-test",
-		Tags:    []string{},
-		Agent:   "claude-code",
-		Related: []string{},
-		Body:    "## Summary\nIdempotent test.\n",
-	}
-	if _, err := session.Write(dir, s); err != nil {
-		t.Fatalf("session.Write: %v", err)
-	}
+	idemDate := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	writeSyncPlan(t, dir, makeSyncPlan("idem1", "idempotent-test", idemDate))
 
-	// Run sync twice.
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if err := runSync(); err != nil {
-			t.Fatalf("runSync (run %d) failed: %v", i+1, err)
+			t.Fatalf("runSync failed: %v", err)
 		}
 	}
 

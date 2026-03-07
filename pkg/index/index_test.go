@@ -1,4 +1,4 @@
-// Package index provides tests for the JSONL session index.
+// Package index provides tests for the JSONL plan index.
 package index
 
 import (
@@ -8,40 +8,54 @@ import (
 	"testing"
 	"time"
 
-	"github.com/senna-lang/logosyncx/pkg/session"
+	"github.com/senna-lang/logosyncx/pkg/plan"
 )
 
 // --- helpers -----------------------------------------------------------------
 
-// setupProject creates a temp directory with a .logosyncx/ structure and
-// returns the project root. It does NOT create index.jsonl.
+// setupProject creates a temp directory with a .logosyncx/plans/ structure.
 func setupProject(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".logosyncx", "sessions"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".logosyncx", "plans"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	return dir
 }
 
-// writeSessionFile writes a session to disk under projectRoot/sessions/.
-func writeSessionFile(t *testing.T, projectRoot string, s session.Session) {
+// writePlanFile writes a plan to disk under projectRoot/plans/ including body.
+// Unlike plan.Write (scaffold-only), this writes the Body field so that
+// excerpt extraction works during Rebuild.
+func writePlanFile(t *testing.T, projectRoot string, p plan.Plan) {
 	t.Helper()
-	if _, err := session.Write(projectRoot, s); err != nil {
-		t.Fatalf("session.Write: %v", err)
+	plansDir := filepath.Join(projectRoot, ".logosyncx", "plans")
+	if err := os.MkdirAll(plansDir, 0o755); err != nil {
+		t.Fatalf("mkdir plans: %v", err)
+	}
+	data, err := plan.Marshal(p)
+	if err != nil {
+		t.Fatalf("plan.Marshal: %v", err)
+	}
+	if p.Body != "" {
+		data = append(data, []byte(p.Body)...)
+	}
+	path := filepath.Join(plansDir, plan.FileName(p))
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
 	}
 }
 
-// makeSession returns a minimal session.Session for testing.
-func makeSession(id, topic string, tags []string, date time.Time) session.Session {
-	return session.Session{
-		ID:      id,
-		Date:    &date,
-		Topic:   topic,
-		Tags:    tags,
-		Agent:   "claude-code",
-		Related: []string{},
-		Body:    "## Summary\nThis is a test session about " + topic + ".\n",
+// makePlan returns a minimal plan.Plan for testing.
+func makePlan(id, topic string, tags []string, date time.Time) plan.Plan {
+	return plan.Plan{
+		ID:       id,
+		Date:     &date,
+		Topic:    topic,
+		Tags:     tags,
+		Agent:    "claude-code",
+		Related:  []string{},
+		TasksDir: ".logosyncx/tasks/" + topic,
+		Body:     "## Background\nThis is a test plan about " + topic + ".\n",
 	}
 }
 
@@ -55,67 +69,141 @@ func TestFilePath_ReturnsExpectedPath(t *testing.T) {
 	}
 }
 
-// --- FromSession -------------------------------------------------------------
+// --- FromPlan ----------------------------------------------------------------
 
-func TestFromSession_CopiesAllFields(t *testing.T) {
-	date := time.Date(2025, 2, 20, 10, 30, 0, 0, time.UTC)
-	s := session.Session{
-		ID:       "abc123",
-		Filename: "2025-02-20_auth.md",
-		Date:     &date,
-		Topic:    "auth",
-		Tags:     []string{"jwt", "security"},
-		Agent:    "claude-code",
-		Related:  []string{"2025-02-15_audit.md"},
-		Excerpt:  "JWT authentication decisions.",
+func TestFromPlan_CopiesAllFields(t *testing.T) {
+	date := time.Date(2026, 3, 4, 10, 30, 0, 0, time.UTC)
+	p := plan.Plan{
+		ID:        "abc123",
+		Filename:  "20260304-auth.md",
+		Date:      &date,
+		Topic:     "auth",
+		Tags:      []string{"jwt", "security"},
+		Agent:     "claude-code",
+		Related:   []string{"20260101-prev.md"},
+		TasksDir:  ".logosyncx/tasks/20260304-auth",
+		Distilled: false,
+		Excerpt:   "JWT authentication decisions.",
 	}
-	e := FromSession(s)
+	e := FromPlan(p, nil)
 
-	if e.ID != s.ID {
-		t.Errorf("ID = %q, want %q", e.ID, s.ID)
+	if e.ID != p.ID {
+		t.Errorf("ID = %q, want %q", e.ID, p.ID)
 	}
-	if e.Filename != s.Filename {
-		t.Errorf("Filename = %q, want %q", e.Filename, s.Filename)
+	if e.Filename != p.Filename {
+		t.Errorf("Filename = %q, want %q", e.Filename, p.Filename)
 	}
-	if !e.Date.Equal(*s.Date) {
-		t.Errorf("Date = %v, want %v", e.Date, *s.Date)
+	if !e.Date.Equal(*p.Date) {
+		t.Errorf("Date = %v, want %v", e.Date, *p.Date)
 	}
-	if e.Topic != s.Topic {
-		t.Errorf("Topic = %q, want %q", e.Topic, s.Topic)
+	if e.Topic != p.Topic {
+		t.Errorf("Topic = %q, want %q", e.Topic, p.Topic)
 	}
-	if len(e.Tags) != len(s.Tags) || e.Tags[0] != s.Tags[0] {
-		t.Errorf("Tags = %v, want %v", e.Tags, s.Tags)
+	if len(e.Tags) != 2 || e.Tags[0] != "jwt" {
+		t.Errorf("Tags = %v, want [jwt security]", e.Tags)
 	}
-	if e.Agent != s.Agent {
-		t.Errorf("Agent = %q, want %q", e.Agent, s.Agent)
+	if e.Agent != p.Agent {
+		t.Errorf("Agent = %q, want %q", e.Agent, p.Agent)
 	}
-	if len(e.Related) != len(s.Related) {
-		t.Errorf("Related = %v, want %v", e.Related, s.Related)
+	if len(e.Related) != 1 || e.Related[0] != "20260101-prev.md" {
+		t.Errorf("Related = %v, want [20260101-prev.md]", e.Related)
 	}
-	if e.Excerpt != s.Excerpt {
-		t.Errorf("Excerpt = %q, want %q", e.Excerpt, s.Excerpt)
+	if e.TasksDir != p.TasksDir {
+		t.Errorf("TasksDir = %q, want %q", e.TasksDir, p.TasksDir)
+	}
+	if e.Excerpt != p.Excerpt {
+		t.Errorf("Excerpt = %q, want %q", e.Excerpt, p.Excerpt)
 	}
 }
 
-func TestFromSession_NilTagsBecomesEmpty(t *testing.T) {
-	s := session.Session{ID: "x", Tags: nil, Related: []string{}}
-	e := FromSession(s)
+func TestFromPlan_NilTagsBecomesEmpty(t *testing.T) {
+	p := plan.Plan{ID: "x", Tags: nil, Related: []string{}}
+	e := FromPlan(p, nil)
 	if e.Tags == nil {
 		t.Error("Tags should be [] not nil")
 	}
-	if len(e.Tags) != 0 {
-		t.Errorf("Tags should be empty, got %v", e.Tags)
-	}
 }
 
-func TestFromSession_NilRelatedBecomesEmpty(t *testing.T) {
-	s := session.Session{ID: "x", Tags: []string{}, Related: nil}
-	e := FromSession(s)
+func TestFromPlan_NilRelatedBecomesEmpty(t *testing.T) {
+	p := plan.Plan{ID: "x", Tags: []string{}, Related: nil}
+	e := FromPlan(p, nil)
 	if e.Related == nil {
 		t.Error("Related should be [] not nil")
 	}
-	if len(e.Related) != 0 {
-		t.Errorf("Related should be empty, got %v", e.Related)
+}
+
+func TestFromPlan_NilDependsOnBecomesEmpty(t *testing.T) {
+	p := plan.Plan{ID: "x", DependsOn: nil}
+	e := FromPlan(p, nil)
+	if e.DependsOn == nil {
+		t.Error("DependsOn should be [] not nil")
+	}
+}
+
+func TestFromPlan_NotBlocked_WhenNoDeps(t *testing.T) {
+	p := plan.Plan{ID: "x", DependsOn: nil}
+	e := FromPlan(p, nil)
+	if e.Blocked {
+		t.Error("expected Blocked = false when no DependsOn")
+	}
+}
+
+func TestFromPlan_NotBlocked_WhenDepsDistilled(t *testing.T) {
+	parent := plan.Plan{
+		ID:        "parent",
+		Filename:  "20260101-parent.md",
+		Topic:     "parent",
+		Distilled: true,
+	}
+	child := plan.Plan{
+		ID:        "child",
+		Filename:  "20260301-child.md",
+		Topic:     "child",
+		DependsOn: []string{"20260101-parent.md"},
+	}
+	e := FromPlan(child, []plan.Plan{parent, child})
+	if e.Blocked {
+		t.Error("expected Blocked = false when all deps are distilled")
+	}
+}
+
+func TestFromPlan_Blocked_WhenDepsNotDistilled(t *testing.T) {
+	parent := plan.Plan{
+		ID:        "parent",
+		Filename:  "20260101-parent.md",
+		Topic:     "parent",
+		Distilled: false, // not distilled
+	}
+	child := plan.Plan{
+		ID:        "child",
+		Filename:  "20260301-child.md",
+		Topic:     "child",
+		DependsOn: []string{"20260101-parent.md"},
+	}
+	e := FromPlan(child, []plan.Plan{parent, child})
+	if !e.Blocked {
+		t.Error("expected Blocked = true when dep is not distilled")
+	}
+}
+
+func TestFromPlan_Blocked_WhenOnlyOneDepsNotDistilled(t *testing.T) {
+	done := plan.Plan{Filename: "20260101-done.md", Distilled: true}
+	pending := plan.Plan{Filename: "20260201-pending.md", Distilled: false}
+	child := plan.Plan{
+		Filename:  "20260301-child.md",
+		DependsOn: []string{"20260101-done.md", "20260201-pending.md"},
+	}
+	e := FromPlan(child, []plan.Plan{done, pending, child})
+	if !e.Blocked {
+		t.Error("expected Blocked = true when at least one dep is not distilled")
+	}
+}
+
+func TestFromPlan_Distilled_PropagatedToEntry(t *testing.T) {
+	p := plan.Plan{ID: "x", Distilled: true}
+	e := FromPlan(p, nil)
+	if !e.Distilled {
+		t.Error("expected Distilled = true in entry")
 	}
 }
 
@@ -131,7 +219,6 @@ func TestReadAll_FileNotExist_ReturnsErrNotExist(t *testing.T) {
 
 func TestReadAll_EmptyFile_ReturnsNoEntries(t *testing.T) {
 	dir := setupProject(t)
-	// Create empty index file.
 	if err := os.WriteFile(FilePath(dir), []byte{}, 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -146,10 +233,10 @@ func TestReadAll_EmptyFile_ReturnsNoEntries(t *testing.T) {
 
 func TestReadAll_OneEntry(t *testing.T) {
 	dir := setupProject(t)
-	date := time.Date(2025, 2, 20, 10, 30, 0, 0, time.UTC)
-	s := makeSession("a1b2c3", "auth-refactor", []string{"auth", "jwt"}, date)
-	e := FromSession(s)
-	e.Filename = "2025-02-20_auth-refactor.md"
+	date := time.Date(2026, 3, 4, 10, 30, 0, 0, time.UTC)
+	p := makePlan("a1b2c3", "auth-refactor", []string{"auth", "jwt"}, date)
+	e := FromPlan(p, nil)
+	e.Filename = "20260304-auth-refactor.md"
 
 	if err := Append(dir, e); err != nil {
 		t.Fatalf("Append: %v", err)
@@ -181,11 +268,12 @@ func TestReadAll_MultipleEntries(t *testing.T) {
 	dir := setupProject(t)
 	for i, topic := range []string{"topic-a", "topic-b", "topic-c"} {
 		e := Entry{
-			ID:      []string{"id1", "id2", "id3"}[i],
-			Topic:   topic,
-			Tags:    []string{},
-			Related: []string{},
-			Date:    time.Now(),
+			ID:        []string{"id1", "id2", "id3"}[i],
+			Topic:     topic,
+			Tags:      []string{},
+			Related:   []string{},
+			DependsOn: []string{},
+			Date:      time.Now(),
 		}
 		if err := Append(dir, e); err != nil {
 			t.Fatalf("Append %s: %v", topic, err)
@@ -203,12 +291,11 @@ func TestReadAll_MultipleEntries(t *testing.T) {
 
 func TestReadAll_SkipsBlankLines(t *testing.T) {
 	dir := setupProject(t)
-	e := Entry{ID: "x1", Topic: "t", Tags: []string{}, Related: []string{}, Date: time.Now()}
+	e := Entry{ID: "x1", Topic: "t", Tags: []string{}, Related: []string{}, DependsOn: []string{}, Date: time.Now()}
 	if err := Append(dir, e); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
 
-	// Append blank lines manually.
 	f, err := os.OpenFile(FilePath(dir), os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		t.Fatalf("open index: %v", err)
@@ -240,7 +327,7 @@ func TestReadAll_MalformedLine_ReturnsError(t *testing.T) {
 
 func TestAppend_CreatesFileIfNotExists(t *testing.T) {
 	dir := setupProject(t)
-	e := Entry{ID: "new1", Topic: "test", Tags: []string{}, Related: []string{}, Date: time.Now()}
+	e := Entry{ID: "new1", Topic: "test", Tags: []string{}, Related: []string{}, DependsOn: []string{}, Date: time.Now()}
 
 	if err := Append(dir, e); err != nil {
 		t.Fatalf("Append: %v", err)
@@ -253,7 +340,7 @@ func TestAppend_CreatesFileIfNotExists(t *testing.T) {
 func TestAppend_MultipleCallsAccumulate(t *testing.T) {
 	dir := setupProject(t)
 	for i, topic := range []string{"a", "b", "c"} {
-		e := Entry{ID: []string{"i1", "i2", "i3"}[i], Topic: topic, Tags: []string{}, Related: []string{}, Date: time.Now()}
+		e := Entry{ID: []string{"i1", "i2", "i3"}[i], Topic: topic, Tags: []string{}, Related: []string{}, DependsOn: []string{}, Date: time.Now()}
 		if err := Append(dir, e); err != nil {
 			t.Fatalf("Append %q: %v", topic, err)
 		}
@@ -270,8 +357,8 @@ func TestAppend_MultipleCallsAccumulate(t *testing.T) {
 
 func TestAppend_PreservesExistingEntries(t *testing.T) {
 	dir := setupProject(t)
-	e1 := Entry{ID: "first", Topic: "first-topic", Tags: []string{}, Related: []string{}, Date: time.Now()}
-	e2 := Entry{ID: "second", Topic: "second-topic", Tags: []string{}, Related: []string{}, Date: time.Now()}
+	e1 := Entry{ID: "first", Topic: "first-topic", Tags: []string{}, Related: []string{}, DependsOn: []string{}, Date: time.Now()}
+	e2 := Entry{ID: "second", Topic: "second-topic", Tags: []string{}, Related: []string{}, DependsOn: []string{}, Date: time.Now()}
 
 	if err := Append(dir, e1); err != nil {
 		t.Fatalf("first Append: %v", err)
@@ -294,34 +381,33 @@ func TestAppend_PreservesExistingEntries(t *testing.T) {
 
 // --- Rebuild -----------------------------------------------------------------
 
-func TestRebuild_EmptySessions_CreatesEmptyIndex(t *testing.T) {
+func TestRebuild_EmptyPlans_CreatesEmptyIndex(t *testing.T) {
 	dir := setupProject(t)
 	n, err := Rebuild(dir, "")
 	if err != nil {
 		t.Fatalf("Rebuild: %v", err)
 	}
 	if n != 0 {
-		t.Errorf("expected 0 sessions indexed, got %d", n)
+		t.Errorf("expected 0 plans indexed, got %d", n)
 	}
-	// Index file should exist even when empty.
 	if _, statErr := os.Stat(FilePath(dir)); statErr != nil {
 		t.Errorf("index.jsonl should exist after Rebuild, got: %v", statErr)
 	}
 }
 
-func TestRebuild_IndexesAllSessions(t *testing.T) {
+func TestRebuild_ScansPlansDir(t *testing.T) {
 	dir := setupProject(t)
-	date := time.Date(2025, 2, 20, 10, 0, 0, 0, time.UTC)
+	date := time.Date(2026, 3, 4, 10, 0, 0, 0, time.UTC)
 
-	writeSessionFile(t, dir, makeSession("id1", "auth-flow", []string{"auth"}, date))
-	writeSessionFile(t, dir, makeSession("id2", "db-schema", []string{"postgres"}, date.Add(-24*time.Hour)))
+	writePlanFile(t, dir, makePlan("id1", "auth-flow", []string{"auth"}, date))
+	writePlanFile(t, dir, makePlan("id2", "db-schema", []string{"postgres"}, date.Add(-24*time.Hour)))
 
 	n, err := Rebuild(dir, "")
 	if err != nil {
 		t.Fatalf("Rebuild: %v", err)
 	}
 	if n != 2 {
-		t.Errorf("expected 2 sessions indexed, got %d", n)
+		t.Errorf("expected 2 plans indexed, got %d", n)
 	}
 
 	entries, err := ReadAll(dir)
@@ -335,22 +421,20 @@ func TestRebuild_IndexesAllSessions(t *testing.T) {
 
 func TestRebuild_OverwritesExistingIndex(t *testing.T) {
 	dir := setupProject(t)
-	date := time.Date(2025, 2, 20, 10, 0, 0, 0, time.UTC)
+	date := time.Date(2026, 3, 4, 10, 0, 0, 0, time.UTC)
 
-	// Write a stale entry directly.
-	stale := Entry{ID: "stale", Topic: "old-topic", Tags: []string{}, Related: []string{}, Date: date}
+	stale := Entry{ID: "stale", Topic: "old-topic", Tags: []string{}, Related: []string{}, DependsOn: []string{}, Date: date}
 	if err := Append(dir, stale); err != nil {
 		t.Fatalf("Append stale: %v", err)
 	}
 
-	// Now write one real session and rebuild.
-	writeSessionFile(t, dir, makeSession("fresh", "new-topic", []string{}, date))
+	writePlanFile(t, dir, makePlan("fresh", "new-topic", []string{}, date))
 	n, err := Rebuild(dir, "")
 	if err != nil {
 		t.Fatalf("Rebuild: %v", err)
 	}
 	if n != 1 {
-		t.Errorf("expected 1 session indexed, got %d", n)
+		t.Errorf("expected 1 plan indexed, got %d", n)
 	}
 
 	entries, err := ReadAll(dir)
@@ -370,18 +454,19 @@ func TestRebuild_OverwritesExistingIndex(t *testing.T) {
 
 func TestRebuild_PopulatesExcerpt(t *testing.T) {
 	dir := setupProject(t)
-	date := time.Date(2025, 2, 20, 10, 0, 0, 0, time.UTC)
-	s := session.Session{
-		ID:      "exc1",
-		Date:    &date,
-		Topic:   "excerpt-test",
-		Tags:    []string{},
-		Related: []string{},
-		Body:    "## Summary\nThis excerpt should appear in the index.\n",
+	date := time.Date(2026, 3, 4, 10, 0, 0, 0, time.UTC)
+	p := plan.Plan{
+		ID:       "exc1",
+		Date:     &date,
+		Topic:    "excerpt-test",
+		Tags:     []string{},
+		Related:  []string{},
+		TasksDir: ".logosyncx/tasks/20260304-excerpt-test",
+		Body:     "## Background\nThis excerpt should appear in the index.\n",
 	}
-	writeSessionFile(t, dir, s)
+	writePlanFile(t, dir, p)
 
-	if _, err := Rebuild(dir, ""); err != nil {
+	if _, err := Rebuild(dir, "Background"); err != nil {
 		t.Fatalf("Rebuild: %v", err)
 	}
 
@@ -397,8 +482,7 @@ func TestRebuild_PopulatesExcerpt(t *testing.T) {
 	}
 }
 
-func TestRebuild_NoSessionsDir_ReturnsZero(t *testing.T) {
-	// Project root has .logosyncx/ but no sessions/ subdir.
+func TestRebuild_NoPlansDir_ReturnsZero(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".logosyncx"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -406,9 +490,9 @@ func TestRebuild_NoSessionsDir_ReturnsZero(t *testing.T) {
 
 	n, err := Rebuild(dir, "")
 	if err != nil {
-		t.Fatalf("Rebuild with no sessions dir: %v", err)
+		t.Fatalf("Rebuild with no plans dir: %v", err)
 	}
 	if n != 0 {
-		t.Errorf("expected 0 sessions, got %d", n)
+		t.Errorf("expected 0 plans, got %d", n)
 	}
 }

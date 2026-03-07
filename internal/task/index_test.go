@@ -21,9 +21,6 @@ func setupTaskIndex(t *testing.T) (string, *Store) {
 	if err := os.MkdirAll(filepath.Join(dir, ".logosyncx", "tasks"), 0o755); err != nil {
 		t.Fatalf("mkdir tasks: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, ".logosyncx", "sessions"), 0o755); err != nil {
-		t.Fatalf("mkdir sessions: %v", err)
-	}
 	cfg := config.Default("test-project")
 	return dir, NewStore(dir, &cfg)
 }
@@ -31,13 +28,14 @@ func setupTaskIndex(t *testing.T) (string, *Store) {
 // makeTaskEntry returns a minimal TaskJSON for testing.
 func makeTaskEntry(id, title string, status Status, date time.Time) TaskJSON {
 	return TaskJSON{
-		ID:       id,
-		Filename: date.Format("2006-01-02") + "_" + slugify(title) + ".md",
-		Date:     date,
-		Title:    title,
-		Status:   status,
-		Priority: PriorityMedium,
-		Tags:     []string{},
+		ID:        id,
+		DirPath:   ".logosyncx/tasks/20260101-test/" + slugify(title),
+		Date:      date,
+		Title:     title,
+		Status:    status,
+		Priority:  PriorityMedium,
+		Tags:      []string{},
+		DependsOn: []int{},
 	}
 }
 
@@ -47,15 +45,15 @@ func writeTaskToStore(t *testing.T, s *Store, title, statusStr string, date time
 	t.Helper()
 	tk := &Task{
 		Title:    title,
+		Plan:     "20260101-test",
 		Status:   Status(statusStr),
 		Priority: PriorityMedium,
 		Date:     date,
 		Tags:     []string{},
-		Body:     "## What\nTest task: " + title + ".\n",
 	}
-	_, err := s.Save(tk, tk.Body)
+	_, err := s.Create(tk)
 	if err != nil {
-		t.Fatalf("Save %q: %v", title, err)
+		t.Fatalf("Create %q: %v", title, err)
 	}
 	return tk.ToJSON()
 }
@@ -246,16 +244,18 @@ func TestAppendTaskIndex_PreservesAllFields(t *testing.T) {
 	dir, _ := setupTaskIndex(t)
 	date := time.Date(2025, 3, 1, 10, 0, 0, 0, time.UTC)
 	e := TaskJSON{
-		ID:       "t-full",
-		Filename: "2025-03-01_full-task.md",
-		Date:     date,
-		Title:    "Full Task",
-		Status:   StatusInProgress,
-		Priority: PriorityHigh,
-		Session:  "2025-02-28_auth.md",
-		Tags:     []string{"refactor", "backend"},
-		Assignee: "alice",
-		Excerpt:  "Refactor the auth module.",
+		ID:        "t-full",
+		DirPath:   ".logosyncx/tasks/20260304-auth-refactor/001-full-task",
+		Date:      date,
+		Title:     "Full Task",
+		Seq:       1,
+		Status:    StatusInProgress,
+		Priority:  PriorityHigh,
+		Plan:      "20260304-auth-refactor",
+		DependsOn: []int{},
+		Tags:      []string{"refactor", "backend"},
+		Assignee:  "alice",
+		Excerpt:   "Refactor the auth module.",
 	}
 	if err := AppendTaskIndex(dir, e); err != nil {
 		t.Fatalf("AppendTaskIndex: %v", err)
@@ -273,8 +273,11 @@ func TestAppendTaskIndex_PreservesAllFields(t *testing.T) {
 	if got.Priority != PriorityHigh {
 		t.Errorf("Priority = %q, want %q", got.Priority, PriorityHigh)
 	}
-	if got.Session != "2025-02-28_auth.md" {
-		t.Errorf("Session = %q, want '2025-02-28_auth.md'", got.Session)
+	if got.Plan != "20260304-auth-refactor" {
+		t.Errorf("Plan = %q, want '20260304-auth-refactor'", got.Plan)
+	}
+	if got.Seq != 1 {
+		t.Errorf("Seq = %d, want 1", got.Seq)
 	}
 	if got.Assignee != "alice" {
 		t.Errorf("Assignee = %q, want 'alice'", got.Assignee)
@@ -381,17 +384,32 @@ func TestRebuildTaskIndex_PopulatesExcerpt(t *testing.T) {
 
 	tk := &Task{
 		Title:    "excerpt task",
+		Plan:     "20260101-test",
 		Status:   StatusOpen,
 		Priority: PriorityMedium,
 		Date:     date,
 		Tags:     []string{},
-		Body:     "## What\nThis excerpt should appear in the task index.\n",
 	}
-	if _, err := store.Save(tk, tk.Body); err != nil {
-		t.Fatalf("Save: %v", err)
+	taskPath, err := store.Create(tk)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
 	}
 
-	// Truncate to force rebuild.
+	// Create writes frontmatter scaffold only — body is empty, so excerpt would
+	// be empty. Manually append a body section so RebuildTaskIndex can extract
+	// a non-empty excerpt.
+	body := "\n## What\n\nThis is the excerpt content for the task.\n"
+	f, err := os.OpenFile(taskPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("open TASK.md for append: %v", err)
+	}
+	if _, err := f.WriteString(body); err != nil {
+		f.Close()
+		t.Fatalf("write body: %v", err)
+	}
+	f.Close()
+
+	// Truncate index to force rebuild.
 	if err := os.WriteFile(TaskIndexFilePath(dir), []byte{}, 0o644); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
@@ -485,7 +503,7 @@ func TestUpdateFields_RebuildsIndex(t *testing.T) {
 	}
 
 	// Update status.
-	if err := store.UpdateFields("update-me", map[string]string{"status": "in_progress"}); err != nil {
+	if err := store.UpdateFields("", "update-me", map[string]string{"status": "in_progress"}); err != nil {
 		t.Fatalf("UpdateFields: %v", err)
 	}
 
@@ -520,7 +538,7 @@ func TestDelete_RebuildsIndex(t *testing.T) {
 	}
 
 	// Delete one task.
-	if err := store.Delete("delete-me"); err != nil {
+	if _, err := store.Delete("", "delete-me"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 

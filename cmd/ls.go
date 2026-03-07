@@ -17,30 +17,33 @@ import (
 
 var lsCmd = &cobra.Command{
 	Use:   "ls",
-	Short: "List saved sessions",
-	Long: `Display a list of saved sessions in .logosyncx/sessions/.
+	Short: "List saved plans",
+	Long: `Display a list of saved plans in .logosyncx/plans/.
 
 Without flags, prints a human-readable table sorted by date (newest first).
-Use --json to get structured output with excerpts, suitable for agent consumption.`,
+Use --json to get structured output with excerpts, suitable for agent consumption.
+Use --blocked to show only plans blocked by an undistilled dependency.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		tag, _ := cmd.Flags().GetString("tag")
 		since, _ := cmd.Flags().GetString("since")
 		asJSON, _ := cmd.Flags().GetBool("json")
+		blocked, _ := cmd.Flags().GetBool("blocked")
 		if asJSON {
 			suppressUpdateCheck = true
 		}
-		return runLS(tag, since, asJSON)
+		return runLS(tag, since, asJSON, blocked)
 	},
 }
 
 func init() {
-	lsCmd.Flags().StringP("tag", "t", "", "Filter sessions by tag")
-	lsCmd.Flags().StringP("since", "s", "", "Filter sessions on or after this date (YYYY-MM-DD)")
+	lsCmd.Flags().StringP("tag", "t", "", "Filter plans by tag")
+	lsCmd.Flags().StringP("since", "s", "", "Filter plans on or after this date (YYYY-MM-DD)")
 	lsCmd.Flags().Bool("json", false, "Output structured JSON (for agent consumption)")
+	lsCmd.Flags().Bool("blocked", false, "Show only plans blocked by an undistilled dependency")
 	rootCmd.AddCommand(lsCmd)
 }
 
-func runLS(tag, since string, asJSON bool) error {
+func runLS(tag, since string, asJSON, blocked bool) error {
 	root, err := project.FindRoot()
 	if err != nil {
 		return err
@@ -50,17 +53,17 @@ func runLS(tag, since string, asJSON bool) error {
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// Auto-rebuild: inform the user and build the index on the fly.
-			fmt.Fprintln(os.Stderr, "index.jsonl not found. Building index from sessions/...")
+			fmt.Fprintln(os.Stderr, "index.jsonl not found. Building index from plans/...")
 			cfg, cfgErr := config.Load(root)
 			if cfgErr != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not load config (%v) — using defaults\n", cfgErr)
 				cfg = config.Default("")
 			}
-			n, buildErr := index.Rebuild(root, cfg.Sessions.ExcerptSection)
+			n, buildErr := index.Rebuild(root, cfg.Plans.ExcerptSection)
 			if buildErr != nil {
 				fmt.Fprintf(os.Stderr, "warning: %v\n", buildErr)
 			}
-			fmt.Fprintf(os.Stderr, "Done. %d sessions indexed.\n\n", n)
+			fmt.Fprintf(os.Stderr, "Done. %d plans indexed.\n\n", n)
 			entries, err = index.ReadAll(root)
 			if err != nil {
 				return fmt.Errorf("read index after rebuild: %w", err)
@@ -84,11 +87,16 @@ func runLS(tag, since string, asJSON bool) error {
 		entries = filterTag(entries, tag)
 	}
 
+	// Apply --blocked filter.
+	if blocked {
+		entries = filterBlocked(entries)
+	}
+
 	// Sort newest first.
 	sortByDateDesc(entries)
 
 	if len(entries) == 0 {
-		fmt.Println("No sessions found.")
+		fmt.Println("No plans found.")
 		return nil
 	}
 
@@ -101,12 +109,16 @@ func runLS(tag, since string, asJSON bool) error {
 // printTable writes a human-readable tab-aligned table to stdout.
 func printTable(entries []index.Entry) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "DATE\tTOPIC\tTAGS")
-	fmt.Fprintln(w, "----\t-----\t----")
+	fmt.Fprintln(w, "DATE\tTOPIC\tTAGS\tDISTILLED")
+	fmt.Fprintln(w, "----\t-----\t----\t---------")
 	for _, e := range entries {
 		date := e.Date.Format("2006-01-02 15:04")
 		tags := joinTags(e.Tags)
-		fmt.Fprintf(w, "%s\t%s\t%s\n", date, e.Topic, tags)
+		distilled := "no"
+		if e.Distilled {
+			distilled = "yes"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", date, e.Topic, tags, distilled)
 	}
 	return w.Flush()
 }
@@ -138,6 +150,16 @@ func filterSince(entries []index.Entry, since time.Time) []index.Entry {
 	for _, e := range entries {
 		sessionDate := e.Date.UTC().Truncate(24 * time.Hour)
 		if !sessionDate.Before(sinceDate) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func filterBlocked(entries []index.Entry) []index.Entry {
+	var out []index.Entry
+	for _, e := range entries {
+		if e.Blocked {
 			out = append(out, e)
 		}
 	}

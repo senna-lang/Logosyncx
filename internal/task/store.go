@@ -1,16 +1,18 @@
 // Package task provides Store — the read/write layer for .logosyncx/tasks/.
+// Layout: .logosyncx/tasks/<plan-slug>/NNN-<title>/TASK.md
 package task
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
-
-	"crypto/rand"
-	"encoding/hex"
 
 	"github.com/senna-lang/logosyncx/internal/gitutil"
 	"github.com/senna-lang/logosyncx/pkg/config"
@@ -19,25 +21,35 @@ import (
 // idPrefix is prepended to every auto-generated task ID.
 const idPrefix = "t-"
 
-// ErrNotFound is returned by Get and ResolveSession when no match is found.
+// taskFileName is the canonical filename for every task file.
+const taskFileName = "TASK.md"
+
+// walkthroughFileName is created when a task is marked done.
+const walkthroughFileName = "WALKTHROUGH.md"
+
+// ErrNotFound is returned by Get when no match is found.
 var ErrNotFound = errors.New("not found")
 
-// ErrAmbiguous is returned by Get and ResolveSession when more than one file
-// matches the supplied partial name.
+// ErrAmbiguous is returned by Get when more than one match is found.
 var ErrAmbiguous = errors.New("ambiguous: multiple matches")
 
-// Store is the read/write gateway for task files in .logosyncx/tasks/.
-// Tasks are organised into status subdirectories:
+// ErrBlocked is returned by UpdateFields when a task cannot be moved to
+// in_progress because one or more of its depends_on tasks are not yet done.
+var ErrBlocked = errors.New("task is blocked by unfinished dependencies")
+
+// Store is the read/write gateway for task files under .logosyncx/tasks/.
+//
+// Directory layout:
 //
 //	.logosyncx/tasks/
-//	├── open/
-//	├── in_progress/
-//	├── done/
-//	└── cancelled/
+//	└── <plan-slug>/          ← one directory per plan
+//	    └── NNN-<title>/      ← one directory per task (zero-padded seq)
+//	        ├── TASK.md       ← frontmatter + body
+//	        └── WALKTHROUGH.md (created when task is marked done)
 type Store struct {
 	projectRoot string
-	dir         string // absolute path to .logosyncx/tasks/ (root)
-	sessionDir  string // absolute path to .logosyncx/sessions/
+	dir         string // absolute path to .logosyncx/tasks/
+	plansDir    string // absolute path to .logosyncx/plans/
 	cfg         *config.Config
 }
 
@@ -46,24 +58,177 @@ func NewStore(projectRoot string, cfg *config.Config) *Store {
 	return &Store{
 		projectRoot: projectRoot,
 		dir:         filepath.Join(projectRoot, ".logosyncx", "tasks"),
-		sessionDir:  filepath.Join(projectRoot, ".logosyncx", "sessions"),
+		plansDir:    filepath.Join(projectRoot, ".logosyncx", "plans"),
 		cfg:         cfg,
 	}
 }
 
-// statusDir returns the absolute path to the subdirectory for the given status.
-func (s *Store) statusDir(status Status) string {
-	return filepath.Join(s.dir, string(status))
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+// NextSeq returns the next available sequential number for tasks inside
+// planGroupDir.  It scans for subdirectories whose names start with a
+// zero-padded decimal prefix (e.g. "001-", "002-") and returns max+1.
+// Returns 1 when planGroupDir does not exist or contains no numbered entries.
+func (s *Store) NextSeq(planGroupDir string) (int, error) {
+	entries, err := os.ReadDir(planGroupDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 1, nil
+		}
+		return 0, fmt.Errorf("read plan group dir %s: %w", planGroupDir, err)
+	}
+
+	max := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		seq := parseSeqPrefix(e.Name())
+		if seq > max {
+			max = seq
+		}
+	}
+	return max + 1, nil
 }
 
-// taskPath returns the absolute path to a task file given its status and base
-// filename.
-func (s *Store) taskPath(status Status, filename string) string {
-	return filepath.Join(s.statusDir(status), filename)
+// Create creates a new task directory and TASK.md scaffold under
+// .logosyncx/tasks/<plan-slug>/NNN-<title>/.
+//
+// Auto-fills: ID, Date, Seq, Status, Priority.
+// t.Plan must be set by the caller (slug of the parent plan).
+// Returns the absolute path to the created TASK.md.
+func (s *Store) Create(t *Task) (string, error) {
+	if strings.TrimSpace(t.Title) == "" {
+		return "", fmt.Errorf("task title is required")
+	}
+	if strings.TrimSpace(t.Plan) == "" {
+		return "", fmt.Errorf("task plan is required")
+	}
+
+	// Auto-fill ID.
+	if t.ID == "" {
+		id, err := generateID()
+		if err != nil {
+			return "", fmt.Errorf("generate task id: %w", err)
+		}
+		t.ID = id
+	}
+
+	// Auto-fill Date.
+	if t.Date.IsZero() {
+		t.Date = time.Now()
+	}
+
+	// Auto-fill Status.
+	if t.Status == "" {
+		t.Status = Status(s.cfg.Tasks.DefaultStatus)
+		if !IsValidStatus(t.Status) {
+			t.Status = StatusOpen
+		}
+	}
+
+	// Auto-fill Priority.
+	if t.Priority == "" {
+		t.Priority = Priority(s.cfg.Tasks.DefaultPriority)
+		if !IsValidPriority(t.Priority) {
+			t.Priority = PriorityMedium
+		}
+	}
+
+	// Resolve plan group directory.
+	planGroupDir := filepath.Join(s.dir, t.Plan)
+
+	// Validate that all depends_on seq numbers exist in the plan group (§8.4).
+	if len(t.DependsOn) > 0 {
+		existing, _ := s.loadPlanTasks(planGroupDir)
+		existingSeqs := make(map[int]bool, len(existing))
+		for _, et := range existing {
+			existingSeqs[et.Seq] = true
+		}
+		for _, dep := range t.DependsOn {
+			if !existingSeqs[dep] {
+				return "", fmt.Errorf("depends_on seq %d does not exist in plan %q", dep, t.Plan)
+			}
+		}
+	}
+
+	// Auto-assign Seq.
+	seq, err := s.NextSeq(planGroupDir)
+	if err != nil {
+		return "", err
+	}
+	t.Seq = seq
+
+	// Create task directory: NNN-<slug>.
+	taskDirName := TaskDirName(t.Seq, t.Title)
+	taskDir := filepath.Join(planGroupDir, taskDirName)
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		return "", fmt.Errorf("create task dir %s: %w", taskDir, err)
+	}
+
+	t.DirPath = taskDir
+
+	// Write TASK.md scaffold (frontmatter only).
+	data, err := Marshal(*t)
+	if err != nil {
+		return "", fmt.Errorf("marshal task: %w", err)
+	}
+
+	taskPath := filepath.Join(taskDir, taskFileName)
+	if err := os.WriteFile(taskPath, data, 0o644); err != nil {
+		return "", fmt.Errorf("write TASK.md: %w", err)
+	}
+
+	// Reload so Excerpt is populated.
+	if loaded, err := s.loadFile(taskPath); err == nil {
+		*t = *loaded
+	}
+
+	// Best-effort git add.
+	if s.cfg.Git.AutoPush {
+		_ = gitutil.Add(s.projectRoot, taskPath)
+	}
+
+	// Best-effort index append.
+	_ = AppendTaskIndex(s.projectRoot, FromTask(t))
+	if s.cfg.Git.AutoPush {
+		_ = gitutil.Add(s.projectRoot, TaskIndexFilePath(s.projectRoot))
+	}
+
+	return taskPath, nil
 }
 
-// List reads every .md file from all status subdirectories, parses them,
-// applies f, and returns the matching tasks sorted newest-first.
+// Get finds the single task matching the given partial strings.
+//
+//   - planPartial: case-insensitive substring matched against plan group
+//     directory names; empty means search all plans.
+//   - nameOrPartial: case-insensitive substring matched against task directory
+//     names (e.g. "001-add-jwt").
+//
+// Returns ErrNotFound (0 matches) or ErrAmbiguous (2+ matches).
+func (s *Store) Get(planPartial, nameOrPartial string) (*Task, error) {
+	taskPaths, err := s.findTaskPaths(planPartial, nameOrPartial)
+	if err != nil {
+		return nil, err
+	}
+
+	switch len(taskPaths) {
+	case 0:
+		return nil, fmt.Errorf("%w: %q in tasks/", ErrNotFound, nameOrPartial)
+	case 1:
+		return s.loadFile(taskPaths[0])
+	default:
+		names := make([]string, len(taskPaths))
+		for i, p := range taskPaths {
+			names[i] = filepath.Base(filepath.Dir(p))
+		}
+		return nil, fmt.Errorf("%w: %q matches %s", ErrAmbiguous, nameOrPartial, strings.Join(names, ", "))
+	}
+}
+
+// List loads all tasks, applies the filter, and returns them sorted newest-first.
 func (s *Store) List(f Filter) ([]*Task, error) {
 	tasks, err := s.loadAll()
 	if err != nil {
@@ -74,190 +239,76 @@ func (s *Store) List(f Filter) ([]*Task, error) {
 	return result, nil
 }
 
-// Get returns the single task whose filename contains nameOrPartial as a
-// case-insensitive substring, searching across all status subdirectories.
-// Returns ErrNotFound if nothing matches, ErrAmbiguous if more than one file
-// matches.
-func (s *Store) Get(nameOrPartial string) (*Task, error) {
-	lower := strings.ToLower(nameOrPartial)
-
-	var matchPaths []string
-	for _, status := range ValidStatuses {
-		subDir := s.statusDir(status)
-		entries, err := os.ReadDir(subDir)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return nil, fmt.Errorf("read tasks/%s dir: %w", status, err)
-		}
-		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-				continue
-			}
-			if strings.Contains(strings.ToLower(e.Name()), lower) {
-				matchPaths = append(matchPaths, filepath.Join(subDir, e.Name()))
-			}
-		}
-	}
-
-	switch len(matchPaths) {
-	case 0:
-		return nil, fmt.Errorf("%w: %q in tasks/", ErrNotFound, nameOrPartial)
-	case 1:
-		return s.loadFile(matchPaths[0])
-	default:
-		names := make([]string, len(matchPaths))
-		for i, p := range matchPaths {
-			names[i] = filepath.Base(p)
-		}
-		return nil, fmt.Errorf("%w: %q matches %s", ErrAmbiguous, nameOrPartial, strings.Join(names, ", "))
-	}
-}
-
-// Save auto-fills t.ID (if empty) and t.Date (if zero), marshals t to
-// markdown, and writes it to tasks/<status>/<date>_<slug>.md.
-// body is the markdown body (everything after the frontmatter closing ---).
-// A git add is attempted after writing; failures are emitted as warnings
-// rather than errors so the file operation is never rolled back.
-// The returned string is the full path of the written file.
-func (s *Store) Save(t *Task, body string) (string, error) {
-	// Auto-fill missing fields.
-	if t.ID == "" {
-		id, err := generateID()
-		if err != nil {
-			return "", fmt.Errorf("generate task id: %w", err)
-		}
-		t.ID = id
-	}
-	if t.Date.IsZero() {
-		t.Date = time.Now()
-	}
-	if t.Status == "" {
-		t.Status = Status(s.cfg.Tasks.DefaultStatus)
-		if !IsValidStatus(t.Status) {
-			fmt.Fprintf(os.Stderr,
-				"warning: config tasks.default_status %q is not a valid status — falling back to %q\n",
-				t.Status, StatusOpen)
-			t.Status = StatusOpen
-		}
-	}
-	if t.Priority == "" {
-		t.Priority = Priority(s.cfg.Tasks.DefaultPriority)
-	}
-
-	// Ensure the status subdirectory exists.
-	subDir := s.statusDir(t.Status)
-	if err := os.MkdirAll(subDir, 0o755); err != nil {
-		return "", fmt.Errorf("create tasks/%s dir: %w", t.Status, err)
-	}
-
-	// Attach body so Marshal produces the full file.
-	t.Body = body
-
-	data, err := Marshal(*t)
-	if err != nil {
-		return "", fmt.Errorf("marshal task: %w", err)
-	}
-
-	filename := FileName(*t)
-	path := s.taskPath(t.Status, filename)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return "", fmt.Errorf("write task file: %w", err)
-	}
-
-	// Reload so Filename and Excerpt are populated from the written file.
-	loaded, err := s.loadFile(path)
-	if err == nil {
-		*t = *loaded
-	}
-
-	// Best-effort git add (auto mode only).
-	if s.cfg.Git.AutoPush {
-		_ = gitutil.Add(s.projectRoot, path)
-	}
-
-	// Best-effort index append.
-	_ = AppendTaskIndex(s.projectRoot, t.ToJSON())
-
-	// Stage the updated index file.
-	if s.cfg.Git.AutoPush {
-		_ = gitutil.Add(s.projectRoot, TaskIndexFilePath(s.projectRoot))
-	}
-
-	return path, nil
-}
-
-// UpdateFields loads the task matching nameOrPartial, applies the given field
-// updates, re-serialises, and writes the file back. If the status field
-// changes, the task file is moved to the new status subdirectory.
-// Supported keys: "status", "priority", "assignee", "session".
-// git operations are attempted after writing (best-effort).
-func (s *Store) UpdateFields(nameOrPartial string, fields map[string]string) error {
-	t, err := s.Get(nameOrPartial)
+// UpdateFields loads the task identified by (planPartial, nameOrPartial),
+// applies the supplied field updates, and writes the TASK.md back in-place
+// (no directory move — status lives in frontmatter only).
+//
+// Supported keys: "status", "priority", "assignee".
+//
+// Special behaviour:
+//   - "status" → "in_progress": hard error if IsBlocked returns true.
+//   - "status" → "done": sets CompletedAt; calls CreateWalkthroughScaffold.
+func (s *Store) UpdateFields(planPartial, nameOrPartial string, fields map[string]string) error {
+	t, err := s.Get(planPartial, nameOrPartial)
 	if err != nil {
 		return err
 	}
-
-	oldStatus := t.Status
-	oldPath := s.taskPath(oldStatus, t.Filename)
 
 	for k, v := range fields {
 		switch k {
 		case "status":
 			newStatus := Status(v)
-			// Record completion timestamp when transitioning to a terminal state.
-			if (newStatus == StatusDone || newStatus == StatusCancelled) &&
-				t.Status != StatusDone && t.Status != StatusCancelled {
+
+			if newStatus == StatusInProgress {
+				// Load sibling tasks to check dependencies.
+				planTasks, _ := s.loadPlanTasks(filepath.Dir(t.DirPath))
+				if IsBlocked(t, planTasks) {
+					return fmt.Errorf("%w: complete dependencies first", ErrBlocked)
+				}
+			}
+
+			if newStatus == StatusDone && t.Status != StatusDone {
 				now := time.Now()
 				t.CompletedAt = &now
 			}
+
 			t.Status = newStatus
+
 		case "priority":
 			t.Priority = Priority(v)
+
 		case "assignee":
 			t.Assignee = v
-		case "session":
-			t.Session = v
+
 		default:
 			return fmt.Errorf("unknown updatable field %q", k)
 		}
 	}
 
-	newPath := s.taskPath(t.Status, t.Filename)
-
-	// Ensure the destination directory exists.
-	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
-		return fmt.Errorf("create status dir: %w", err)
-	}
-
-	// Write updated content to the new path.
+	// Write back in-place — no directory move.
+	taskPath := filepath.Join(t.DirPath, taskFileName)
 	data, err := Marshal(*t)
 	if err != nil {
 		return fmt.Errorf("marshal task: %w", err)
 	}
-	if err := os.WriteFile(newPath, data, 0o644); err != nil {
-		return fmt.Errorf("write task file: %w", err)
+	if err := os.WriteFile(taskPath, data, 0o644); err != nil {
+		return fmt.Errorf("write TASK.md: %w", err)
 	}
 
-	// If the status changed, remove the old file and update git accordingly.
-	if oldPath != newPath {
-		if err := os.Remove(oldPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("remove old task file: %w", err)
-		}
-		if s.cfg.Git.AutoPush {
-			_ = gitutil.Remove(s.projectRoot, oldPath)
+	// Create walkthrough scaffold when task is marked done.
+	if t.Status == StatusDone {
+		if err := s.CreateWalkthroughScaffold(t); err != nil {
+			// Non-fatal: warn but don't fail the update.
+			fmt.Fprintf(os.Stderr, "warning: could not create walkthrough scaffold: %v\n", err)
 		}
 	}
 
 	if s.cfg.Git.AutoPush {
-		_ = gitutil.Add(s.projectRoot, newPath)
+		_ = gitutil.Add(s.projectRoot, taskPath)
 	}
 
-	// Rebuild index to reflect updated field values (best-effort).
+	// Best-effort index rebuild.
 	_, _ = s.RebuildTaskIndex()
-
-	// Stage the updated index file.
 	if s.cfg.Git.AutoPush {
 		_ = gitutil.Add(s.projectRoot, TaskIndexFilePath(s.projectRoot))
 	}
@@ -265,179 +316,167 @@ func (s *Store) UpdateFields(nameOrPartial string, fields map[string]string) err
 	return nil
 }
 
-// Delete removes the task file matching nameOrPartial from its status
-// subdirectory. git rm is attempted after deletion (best-effort).
-func (s *Store) Delete(nameOrPartial string) error {
-	t, err := s.Get(nameOrPartial)
+// Delete removes the task directory (including TASK.md and WALKTHROUGH.md)
+// identified by (planPartial, nameOrPartial), then rebuilds the index.
+func (s *Store) Delete(planPartial, nameOrPartial string) (*Task, error) {
+	t, err := s.Get(planPartial, nameOrPartial)
 	if err != nil {
-		return err
-	}
-
-	path := s.taskPath(t.Status, t.Filename)
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove task file: %w", err)
+		return nil, err
 	}
 
 	if s.cfg.Git.AutoPush {
-		_ = gitutil.Remove(s.projectRoot, path)
+		_ = gitutil.Remove(s.projectRoot, t.DirPath)
 	}
 
-	// Rebuild index to remove the deleted entry (best-effort).
-	_, _ = s.RebuildTaskIndex()
+	if err := os.RemoveAll(t.DirPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("remove task dir %s: %w", t.DirPath, err)
+	}
 
-	// Stage the updated index file.
+	_, _ = s.RebuildTaskIndex()
 	if s.cfg.Git.AutoPush {
 		_ = gitutil.Add(s.projectRoot, TaskIndexFilePath(s.projectRoot))
 	}
 
-	return nil
+	return t, nil
 }
 
-// Purge deletes all task files in the given status subdirectory.
-// git rm is attempted for each deleted file (best-effort).
-// The first return value is the number of files successfully deleted.
-func (s *Store) Purge(status Status) (int, error) {
-	subDir := s.statusDir(status)
-	entries, err := os.ReadDir(subDir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return 0, nil
-		}
-		return 0, fmt.Errorf("read tasks/%s dir: %w", status, err)
+// IsBlocked reports whether t has any unfinished dependencies within
+// planTasks (same plan group).  A task is blocked when at least one seq
+// number listed in t.DependsOn belongs to a task whose status is not done.
+func IsBlocked(t *Task, planTasks []*Task) bool {
+	if len(t.DependsOn) == 0 {
+		return false
 	}
-
-	count := 0
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		path := filepath.Join(subDir, e.Name())
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return count, fmt.Errorf("remove %s: %w", e.Name(), err)
-		}
-		if s.cfg.Git.AutoPush {
-			_ = gitutil.Remove(s.projectRoot, path)
-		}
-		count++
+	seqStatus := make(map[int]Status, len(planTasks))
+	for _, pt := range planTasks {
+		seqStatus[pt.Seq] = pt.Status
 	}
-
-	if count > 0 {
-		_, _ = s.RebuildTaskIndex()
-
-		// Stage the updated index file.
-		if s.cfg.Git.AutoPush {
-			_ = gitutil.Add(s.projectRoot, TaskIndexFilePath(s.projectRoot))
+	for _, dep := range t.DependsOn {
+		if status, ok := seqStatus[dep]; !ok || status != StatusDone {
+			return true
 		}
 	}
-
-	return count, nil
+	return false
 }
 
-// AppendSession adds sessionFilename to the task's Sessions list (if not already present).
-// It also sets Session to sessionFilename if Session is currently empty (backward compat).
-// The task file is written back to disk and the index is rebuilt (best-effort).
-func (s *Store) AppendSession(nameOrPartial, sessionFilename string) error {
-	t, err := s.Get(nameOrPartial)
-	if err != nil {
-		return err
+// CreateWalkthroughScaffold writes a WALKTHROUGH.md scaffold into t.DirPath.
+// If the file already exists, it is left untouched (idempotent).
+func (s *Store) CreateWalkthroughScaffold(t *Task) error {
+	path := filepath.Join(t.DirPath, walkthroughFileName)
+
+	// Idempotent: do nothing if the file already exists.
+	if _, err := os.Stat(path); err == nil {
+		return nil
 	}
 
-	// Avoid duplicates.
-	for _, sf := range t.Sessions {
-		if sf == sessionFilename {
-			return nil
-		}
-	}
-	t.Sessions = append(t.Sessions, sessionFilename)
+	content := fmt.Sprintf(`# Walkthrough: %s
 
-	// Maintain Session field for backward compat: use the first entry.
-	if t.Session == "" {
-		t.Session = sessionFilename
-	}
+<!-- Auto-generated when this task was marked done. -->
+<!-- Fill in each section before running logos distill. -->
 
-	path := s.taskPath(t.Status, t.Filename)
-	data, err := Marshal(*t)
-	if err != nil {
-		return fmt.Errorf("marshal task: %w", err)
-	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("write task file: %w", err)
+## What Was Done
+
+<!-- Describe what was actually implemented or resolved. -->
+
+## How It Was Done
+
+<!-- Key steps, approach taken, alternatives considered. -->
+
+## Gotchas & Lessons Learned
+
+<!-- Anything that tripped you up, surprising behaviour, edge cases. -->
+
+## Reusable Patterns
+
+<!-- Code snippets, patterns, or conventions worth reusing. -->
+`, t.Title)
+
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write WALKTHROUGH.md: %w", err)
 	}
 
 	if s.cfg.Git.AutoPush {
 		_ = gitutil.Add(s.projectRoot, path)
 	}
 
-	_, _ = s.RebuildTaskIndex()
-	if s.cfg.Git.AutoPush {
-		_ = gitutil.Add(s.projectRoot, TaskIndexFilePath(s.projectRoot))
-	}
-
 	return nil
 }
 
-// ResolveSession finds the session filename in sessions/ that contains
-// partial as a case-insensitive substring.  Returns ErrNotFound if nothing
-// matches, ErrAmbiguous if more than one file matches.
-func (s *Store) ResolveSession(partial string) (string, error) {
-	entries, err := os.ReadDir(s.sessionDir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("%w: %q in sessions/", ErrNotFound, partial)
-		}
-		return "", fmt.Errorf("read sessions dir: %w", err)
+// RebuildTaskIndex discards the existing task index and reconstructs it by
+// scanning all TASK.md files. An empty index file is always created so that
+// subsequent ReadAllTaskIndex calls succeed without triggering another rebuild.
+func (s *Store) RebuildTaskIndex() (int, error) {
+	path := TaskIndexFilePath(s.projectRoot)
+
+	if err := os.WriteFile(path, []byte{}, 0o644); err != nil {
+		return 0, fmt.Errorf("create task index: %w", err)
 	}
 
-	var matches []string
-	lower := strings.ToLower(partial)
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		if strings.Contains(strings.ToLower(e.Name()), lower) {
-			matches = append(matches, e.Name())
+	tasks, loadErr := s.loadAll()
+
+	// Group by plan to compute blocked status per plan group.
+	planGroups := make(map[string][]*Task)
+	for _, t := range tasks {
+		planGroups[t.Plan] = append(planGroups[t.Plan], t)
+	}
+
+	for _, t := range tasks {
+		entry := FromTask(t)
+		entry.Blocked = IsBlocked(t, planGroups[t.Plan])
+		if err := AppendTaskIndex(s.projectRoot, entry); err != nil {
+			return 0, fmt.Errorf("append task index entry for %s: %w", t.DirPath, err)
 		}
 	}
 
-	switch len(matches) {
-	case 0:
-		return "", fmt.Errorf("%w: %q in sessions/", ErrNotFound, partial)
-	case 1:
-		return matches[0], nil
-	default:
-		return "", fmt.Errorf("%w: %q matches %s", ErrAmbiguous, partial, strings.Join(matches, ", "))
-	}
+	return len(tasks), loadErr
 }
 
-// --- private helpers ---------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Backward-compat shim used by cmd layer (single-arg Get)
+// ---------------------------------------------------------------------------
 
-// loadAll reads every .md file from all status subdirectories and returns all
-// successfully parsed tasks. Parse errors are accumulated but do not abort
-// the overall read.
+// GetByName is a convenience wrapper that searches all plans.
+// Callers that don't have a plan partial can use this instead of Get("", name).
+func (s *Store) GetByName(nameOrPartial string) (*Task, error) {
+	return s.Get("", nameOrPartial)
+}
+
+// ---------------------------------------------------------------------------
+// Private helpers
+// ---------------------------------------------------------------------------
+
+// loadAll walks .logosyncx/tasks/<plan>/<task>/TASK.md and returns every
+// successfully parsed task.  Parse errors are accumulated (non-fatal).
 func (s *Store) loadAll() ([]*Task, error) {
 	var tasks []*Task
 	var errs []string
 
-	for _, status := range ValidStatuses {
-		subDir := s.statusDir(status)
-		entries, err := os.ReadDir(subDir)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return nil, fmt.Errorf("read tasks/%s dir: %w", status, err)
+	planEntries, err := os.ReadDir(s.dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
 		}
-		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-				continue
-			}
-			t, err := s.loadFile(filepath.Join(subDir, e.Name()))
-			if err != nil {
-				errs = append(errs, fmt.Sprintf("%s/%s: %v", status, e.Name(), err))
-				continue
-			}
-			tasks = append(tasks, t)
+		return nil, fmt.Errorf("read tasks dir: %w", err)
+	}
+
+	for _, planEntry := range planEntries {
+		if !planEntry.IsDir() {
+			continue
 		}
+		planGroupDir := filepath.Join(s.dir, planEntry.Name())
+		planTasks, parseErrs := s.loadPlanTasks(planGroupDir)
+		errs = append(errs, parseErrs...)
+
+		// Compute Blocked for each task in this plan group.
+		for _, t := range planTasks {
+			if IsBlocked(t, planTasks) {
+				// We store Blocked only in the JSON representation;
+				// the Task struct itself doesn't carry it.
+				// No-op here — ToJSON() / FromTask() will compute it on demand.
+				_ = t
+			}
+		}
+		tasks = append(tasks, planTasks...)
 	}
 
 	if len(errs) > 0 {
@@ -447,21 +486,102 @@ func (s *Store) loadAll() ([]*Task, error) {
 	return tasks, nil
 }
 
-// loadFile reads and parses a single task file at path.
-// Task.Filename is set to the base filename only (not including the status
-// subdirectory), as the status field on the Task itself encodes the subdir.
+// loadPlanTasks loads all TASK.md files inside a single plan group directory.
+// Returns parsed tasks and a (possibly empty) slice of error strings.
+func (s *Store) loadPlanTasks(planGroupDir string) ([]*Task, []string) {
+	var tasks []*Task
+	var errs []string
+
+	taskEntries, err := os.ReadDir(planGroupDir)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, fmt.Sprintf("%s: %v", planGroupDir, err))
+		}
+		return nil, errs
+	}
+
+	for _, taskEntry := range taskEntries {
+		if !taskEntry.IsDir() {
+			continue
+		}
+		taskPath := filepath.Join(planGroupDir, taskEntry.Name(), taskFileName)
+		t, err := s.loadFile(taskPath)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", taskPath, err))
+			continue
+		}
+		tasks = append(tasks, t)
+	}
+
+	// Sort by Seq so dependency resolution is deterministic.
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].Seq < tasks[j].Seq
+	})
+
+	return tasks, errs
+}
+
+// loadFile reads and parses a single TASK.md file at path.
+// DirPath is set to the directory containing the file.
 func (s *Store) loadFile(path string) (*Task, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	t, err := ParseWithOptions(filepath.Base(path), data, ParseOptions{
+	t, err := ParseWithOptions(taskFileName, data, ParseOptions{
 		ExcerptSection: s.cfg.Tasks.ExcerptSection,
 	})
 	if err != nil {
 		return nil, err
 	}
+	t.DirPath = filepath.Dir(path)
 	return &t, nil
+}
+
+// findTaskPaths returns the TASK.md paths that match planPartial and
+// nameOrPartial.  planPartial empty → search all plan groups.
+func (s *Store) findTaskPaths(planPartial, nameOrPartial string) ([]string, error) {
+	planEntries, err := os.ReadDir(s.dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read tasks dir: %w", err)
+	}
+
+	lowerPlan := strings.ToLower(planPartial)
+	lowerName := strings.ToLower(nameOrPartial)
+
+	var matches []string
+	for _, planEntry := range planEntries {
+		if !planEntry.IsDir() {
+			continue
+		}
+		if lowerPlan != "" && !strings.Contains(strings.ToLower(planEntry.Name()), lowerPlan) {
+			continue
+		}
+
+		planGroupDir := filepath.Join(s.dir, planEntry.Name())
+		taskEntries, err := os.ReadDir(planGroupDir)
+		if err != nil {
+			continue
+		}
+
+		for _, taskEntry := range taskEntries {
+			if !taskEntry.IsDir() {
+				continue
+			}
+			if lowerName != "" && !strings.Contains(strings.ToLower(taskEntry.Name()), lowerName) {
+				continue
+			}
+			candidate := filepath.Join(planGroupDir, taskEntry.Name(), taskFileName)
+			if _, err := os.Stat(candidate); err == nil {
+				matches = append(matches, candidate)
+			}
+		}
+	}
+
+	return matches, nil
 }
 
 // generateID returns a new unique task ID of the form "t-<6 hex chars>".
@@ -471,6 +591,20 @@ func generateID() (string, error) {
 		return "", err
 	}
 	return idPrefix + hex.EncodeToString(b), nil
+}
+
+// parseSeqPrefix extracts the leading decimal number from a directory name
+// like "001-add-jwt-middleware".  Returns 0 if no prefix is found.
+func parseSeqPrefix(name string) int {
+	idx := strings.IndexByte(name, '-')
+	if idx <= 0 {
+		return 0
+	}
+	n, err := strconv.Atoi(name[:idx])
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // sortByDateDesc sorts tasks newest-first in-place.

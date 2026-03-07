@@ -1,10 +1,22 @@
 # Agent Instructions
 
-This project uses **logos** for session context and task tracking, stored in `.logosyncx/`.
+This project uses **logos** for plan and task tracking, stored in `.logosyncx/`.
+
+## Task Tracking
+
+```bash
+logos task ls --status open --json                        # Find available work
+logos task refer --name <name>                            # View task details
+logos task update --name <name> --status in_progress      # Claim a task
+logos task update --name <name> --status done             # Complete a task
+logos sync                                                # Rebuild plan and task indexes
+```
+
+**Session completion is mandatory** — see the workflow below.
 
 ## MANDATORY: logos Command Triggers
 
-The following triggers are **not optional**. When any of these conditions occur, you MUST run the corresponding command immediately — even if the user has not explicitly asked.
+The following triggers are **not optional**. When any of these conditions occur, you MUST run the corresponding command immediately.
 
 ### Starting any work session
 
@@ -14,7 +26,7 @@ The following triggers are **not optional**. When any of these conditions occur,
 logos ls --json
 ```
 
-Scan the `topic`, `tags`, and `excerpt` fields to find relevant past sessions.
+Scan the `topic`, `tags`, and `excerpt` fields to find relevant past plans.
 If anything looks relevant, run:
 
 ```bash
@@ -25,98 +37,74 @@ logos refer --name <filename> --summary
 
 | If the user says (any variation) | You MUST run |
 |---|---|
-| "save this session", "log this", "save our conversation", "セッションを保存して", "記録して", "ログして" | `logos save` with topic + sections |
-| "make that a task", "add a TODO", "save that for later", "タスクにして", "あとでやる", "issueにして" | `logos task create` with title + sections |
-| "what did we do last time", "前回の続き", "any past context?", "show me related sessions" | `logos ls --json` then `logos refer --name <name>` |
-| "continue from last session", "pick up where we left off" | `logos ls --json` → find latest relevant → `logos refer --name <name>` |
+| "save this plan", "log this", "記録して" | `logos save --topic "..."` then write body with Write tool |
+| "make that a task", "タスクにして" | `logos task create --plan <name> --title "..."` |
+| "what did we do last time", "前回の続き" | `logos ls --json` then `logos refer --name <name>` |
+| "continue from last session", "前回の続きから" | `logos ls --json` -> find latest relevant -> `logos refer --name <name>` |
 
-**Never respond with "I can't save sessions" or "I don't have access to logos."**
-The `logos` binary is installed in this environment. Use it via shell.
-
-### When saving a session
-
-You MUST collect the following and pass them as `--section` flags:
+### When saving a plan
 
 ```bash
-logos save --topic "short description of this session" \
-           --tag <relevant-tag> \
-           --agent <your-agent-name> \
-           --section "Summary=What happened in this session." \
-           --section "Key Decisions=- Decision one\n- Decision two" \
-           --section "Context Used=- <any past sessions you referenced>"
+logos save --topic "short description" --tag <tag> --agent <agent-name>
 ```
 
-Allowed section names are in `.logosyncx/config.json` under `sessions.sections`.
-Do NOT use `--body`, `--description`, or positional arguments — they do not exist.
+Then open the created file and write the body using the template:
+
+```bash
+# Read the plan template first
+cat .logosyncx/templates/plan.md
+
+# Write the body directly into the plan file using the Write tool
+```
+
+Do NOT use `--section` flags — they do not exist in v2.
 
 ### When creating a task
 
 ```bash
-logos task create --title "Implement the thing" \
-                  --priority high \
-                  --tag <tag> \
-                  --session <partial-session-filename> \
-                  --section "What=What needs to be done." \
-                  --section "Why=Why this matters." \
-                  --section "Scope=What is and is not included." \
-                  --section "Checklist=- [ ] step one\n- [ ] step two"
+logos task create --plan <plan-slug> --title "Implement the thing" --priority high
 ```
 
-Allowed section names are in `.logosyncx/config.json` under `tasks.sections`.
-
----
-
-## Task Tracking Quick Reference
+Then open the created TASK.md and write the body using the template:
 
 ```bash
-logos task ls --status open --json                        # Find available work
-logos task refer --name <name>                            # View task details
-logos task update --name <name> --status in_progress      # Claim a task
-logos task update --name <name> --status done             # Complete a task (moves file to tasks/done/)
-logos sync                                                # Rebuild session and task indexes
+cat .logosyncx/templates/task.md
 ```
 
 ---
 
 ## Landing the Plane (Session Completion)
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+**When ending a work session**, complete ALL steps below. Work is NOT complete until `git push` succeeds.
 
-**MANDATORY WORKFLOW:**
-
-1. **File tasks for remaining work** — Create tasks for anything that needs follow-up:
+1. **File tasks for remaining work:**
    ```bash
-   logos task create --title "..." --session <current-session-filename>
+   logos task create --plan <plan-slug> --title "..."
    ```
-2. **Run quality gates** (if code changed) — Tests, linters, builds
-3. **Update task status** — Close finished work:
+2. **Run quality gates** (if code changed): `go test ./...`
+3. **Update task status:**
    ```bash
    logos task update --name <name> --status done
    ```
-4. **Save this session:**
+4. **Save this plan:**
    ```bash
-   logos save --topic "..." \
-              --section "Summary=..." \
-              --section "Key Decisions=..." \
-              --section "Context Used=..."
+   logos save --topic "..."
+   # Write the body into the plan file
    ```
-5. **PUSH TO REMOTE** — This is MANDATORY:
+5. **PUSH TO REMOTE** — MANDATORY:
    ```bash
    git pull --rebase
    logos sync
    git add .logosyncx/
-   git commit -m "session: <topic>"
+   git commit -m "logos: save plan \"<topic>\""
    git push
-   git status  # MUST show "up to date with origin"
    ```
-6. **Verify** — All changes committed AND pushed
-7. **Hand off** — Provide a brief summary of what was done and what tasks remain
+6. **Verify** — `git status` MUST show "up to date with origin"
 
 **CRITICAL RULES:**
 - Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing — that leaves work stranded locally
-- NEVER say "ready to push when you are" — YOU must push
-- If push fails, resolve and retry until it succeeds
+- NEVER stop before pushing
+- Always read the template before writing any document body
 
 ---
 

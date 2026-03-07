@@ -14,9 +14,9 @@ import (
 
 var searchCmd = &cobra.Command{
 	Use:   "search",
-	Short: "Keyword search across session topic, tags, and excerpt",
+	Short: "Keyword search across plan topic, tags, and excerpt",
 	Long: `Case-insensitive keyword search across the topic, tags, and excerpt of every
-saved session. Results are printed as a human-readable table sorted by date
+saved plan. Results are printed as a human-readable table sorted by date
 (newest first).
 
 Combine with --tag to pre-filter by tag before applying the keyword match.
@@ -49,17 +49,17 @@ func runSearch(keyword, tag string) error {
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// Auto-rebuild: inform the user and build the index on the fly.
-			fmt.Fprintln(os.Stderr, "index.jsonl not found. Building index from sessions/...")
+			fmt.Fprintln(os.Stderr, "index.jsonl not found. Building index from plans/...")
 			cfg, cfgErr := config.Load(root)
 			if cfgErr != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not load config (%v) — using defaults\n", cfgErr)
 				cfg = config.Default("")
 			}
-			n, buildErr := index.Rebuild(root, cfg.Sessions.ExcerptSection)
+			n, buildErr := index.Rebuild(root, cfg.Plans.ExcerptSection)
 			if buildErr != nil {
 				fmt.Fprintf(os.Stderr, "warning: %v\n", buildErr)
 			}
-			fmt.Fprintf(os.Stderr, "Done. %d sessions indexed.\n\n", n)
+			fmt.Fprintf(os.Stderr, "Done. %d plans indexed.\n\n", n)
 			entries, err = index.ReadAll(root)
 			if err != nil {
 				return fmt.Errorf("read index after rebuild: %w", err)
@@ -81,7 +81,7 @@ func runSearch(keyword, tag string) error {
 	sortByDateDesc(entries)
 
 	if len(entries) == 0 {
-		fmt.Println("No sessions found.")
+		fmt.Println("No plans found.")
 		return nil
 	}
 

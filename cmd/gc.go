@@ -14,7 +14,7 @@ import (
 	"github.com/senna-lang/logosyncx/internal/task"
 	"github.com/senna-lang/logosyncx/pkg/config"
 	"github.com/senna-lang/logosyncx/pkg/index"
-	"github.com/senna-lang/logosyncx/pkg/session"
+	"github.com/senna-lang/logosyncx/pkg/plan"
 	"github.com/spf13/cobra"
 )
 
@@ -22,24 +22,24 @@ import (
 
 var gcCmd = &cobra.Command{
 	Use:   "gc",
-	Short: "Archive stale session files to sessions/archive/",
-	Long: `Scan all sessions and move stale ones to .logosyncx/sessions/archive/.
+	Short: "Archive stale plan files to plans/archive/",
+	Long: `Scan all plans and move stale ones to .logosyncx/plans/archive/.
 
-A session is a GC candidate when one of the following is true:
+A plan is a GC candidate when one of the following is true:
 
   Strong candidate (--linked-days, default 30):
-    All tasks linked to the session are done or cancelled, AND at least
-    linked-days have passed since the latest task completion (or since the
-    session was created when completed_at is not recorded).
+    plan.distilled == true, all tasks done, and at least linked-days have
+    passed since the latest task completion (or the plan creation date when
+    completed_at is not recorded).
 
   Weak candidate (--orphan-days, default 90):
-    The session has no linked tasks and is older than orphan-days.
+    The plan has no tasks and is older than orphan-days.
 
-Sessions with at least one linked task still open or in_progress are
+Plans with at least one linked task still open or in_progress are
 protected and will never be selected.
 
 Use --dry-run to preview candidates without moving any files.
-Run "logos gc purge" to permanently delete all archived sessions.`,
+Run "logos gc purge" to permanently delete all archived plans.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
@@ -53,8 +53,8 @@ Run "logos gc purge" to permanently delete all archived sessions.`,
 
 var gcPurgeCmd = &cobra.Command{
 	Use:   "purge",
-	Short: "Permanently delete all sessions in sessions/archive/",
-	Long: `Delete every session file stored in .logosyncx/sessions/archive/.
+	Short: "Permanently delete all plans in plans/archive/",
+	Long: `Delete every plan file stored in .logosyncx/plans/archive/.
 
 This is irreversible. Use --dry-run on "logos gc" first to inspect what
 was archived before running this command.`,
@@ -67,8 +67,8 @@ was archived before running this command.`,
 
 func init() {
 	gcCmd.Flags().Bool("dry-run", false, "Preview candidates without moving any files")
-	gcCmd.Flags().Int("linked-days", 0, "Days since task completion before a linked session is archived (default from config: 30)")
-	gcCmd.Flags().Int("orphan-days", 0, "Days since creation before a session with no linked tasks is archived (default from config: 90)")
+	gcCmd.Flags().Int("linked-days", 0, "Days since task completion before a distilled plan is archived (default from config: 30)")
+	gcCmd.Flags().Int("orphan-days", 0, "Days since creation before a plan with no tasks is archived (default from config: 90)")
 
 	gcPurgeCmd.Flags().Bool("force", false, "Skip confirmation prompt")
 
@@ -78,17 +78,17 @@ func init() {
 
 // --- GC candidate types ------------------------------------------------------
 
-// gcTier describes how strongly a session qualifies for archival.
+// gcTier describes how strongly a plan qualifies for archival.
 type gcTier int
 
 const (
-	gcTierStrong gcTier = 1 // all linked tasks done/cancelled
+	gcTierStrong gcTier = 1 // distilled + all tasks done
 	gcTierWeak   gcTier = 2 // no linked tasks
 )
 
-// gcCandidate holds a session and the reason it was selected.
+// gcCandidate holds a plan and the reason it was selected.
 type gcCandidate struct {
-	sess    session.Session
+	p       plan.Plan
 	reason  string
 	ageDays int
 	tier    gcTier
@@ -111,7 +111,7 @@ func runGC(dryRun bool, linkedDays, orphanDays int, linkedChanged, orphanChanged
 		linkedDays = cfg.GC.LinkedTaskDoneDays
 	}
 	if !orphanChanged {
-		orphanDays = cfg.GC.OrphanSessionDays
+		orphanDays = cfg.GC.OrphanPlanDays
 	}
 
 	candidates, err := findGCCandidates(root, &cfg, linkedDays, orphanDays)
@@ -120,33 +120,33 @@ func runGC(dryRun bool, linkedDays, orphanDays int, linkedChanged, orphanChanged
 	}
 
 	if len(candidates) == 0 {
-		fmt.Println("No sessions eligible for archival.")
+		fmt.Println("No plans eligible for archival.")
 		return nil
 	}
 
 	if dryRun {
 		printGCCandidates(candidates, linkedDays, orphanDays)
-		fmt.Printf("\n%d session(s) would be archived. Run without --dry-run to proceed.\n", len(candidates))
+		fmt.Printf("\n%d plan(s) would be archived. Run without --dry-run to proceed.\n", len(candidates))
 		return nil
 	}
 
 	// Archive each candidate.
 	archived := 0
 	for _, c := range candidates {
-		dst, err := session.Archive(root, c.sess.Filename)
+		dst, err := plan.Archive(root, c.p.Filename)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not archive %s: %v\n", c.sess.Filename, err)
+			fmt.Fprintf(os.Stderr, "warning: could not archive %s: %v\n", c.p.Filename, err)
 			continue
 		}
 
 		// git: remove old path, stage new path (best-effort).
 		if cfg.Git.AutoPush {
-			oldPath := filepath.Join(session.SessionsDir(root), c.sess.Filename)
+			oldPath := filepath.Join(plan.PlansDir(root), c.p.Filename)
 			_ = gitutil.Remove(root, oldPath)
 			_ = gitutil.Add(root, dst)
 		}
 
-		fmt.Printf("  → archived %s\n", c.sess.Filename)
+		fmt.Printf("  → archived %s\n", c.p.Filename)
 		archived++
 	}
 
@@ -154,17 +154,17 @@ func runGC(dryRun bool, linkedDays, orphanDays int, linkedChanged, orphanChanged
 		return fmt.Errorf("all archive operations failed — check warnings above")
 	}
 
-	// Rebuild session index so archived sessions no longer appear in logos ls.
-	n, err := index.Rebuild(root, cfg.Sessions.ExcerptSection)
+	// Rebuild plan index so archived plans no longer appear in logos ls.
+	n, err := index.Rebuild(root, cfg.Plans.ExcerptSection)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: session index rebuild: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: plan index rebuild: %v\n", err)
 	}
 	if cfg.Git.AutoPush {
 		_ = gitutil.Add(root, index.FilePath(root))
 	}
 
-	fmt.Printf("✓ Archived %d session(s). Session index rebuilt (%d active sessions).\n", archived, n)
-	fmt.Println("  Run `logos gc purge --force` to permanently delete archived sessions.")
+	fmt.Printf("✓ Archived %d plan(s). Plan index rebuilt (%d active plans).\n", archived, n)
+	fmt.Println("  Run `logos gc purge --force` to permanently delete archived plans.")
 	return nil
 }
 
@@ -178,18 +178,18 @@ func runGCPurge(force bool) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	archived, err := session.LoadArchived(root)
+	archivedFiles, err := loadArchivedPlanFilenames(root)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 	}
-	if len(archived) == 0 {
-		fmt.Println("No archived sessions to purge.")
+	if len(archivedFiles) == 0 {
+		fmt.Println("No archived plans to purge.")
 		return nil
 	}
 
-	fmt.Printf("This will permanently delete %d archived session(s):\n", len(archived))
-	for _, s := range archived {
-		fmt.Printf("  - %s\n", s.Filename)
+	fmt.Printf("This will permanently delete %d archived plan(s):\n", len(archivedFiles))
+	for _, f := range archivedFiles {
+		fmt.Printf("  - %s\n", f)
 	}
 
 	if !force {
@@ -203,12 +203,12 @@ func runGCPurge(force bool) error {
 		}
 	}
 
-	archiveDir := session.ArchiveDir(root)
+	archiveDir := plan.ArchiveDir(root)
 	count := 0
-	for _, s := range archived {
-		path := filepath.Join(archiveDir, s.Filename)
+	for _, f := range archivedFiles {
+		path := filepath.Join(archiveDir, f)
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "warning: could not delete %s: %v\n", s.Filename, err)
+			fmt.Fprintf(os.Stderr, "warning: could not delete %s: %v\n", f, err)
 			continue
 		}
 		if cfg.Git.AutoPush {
@@ -217,18 +217,35 @@ func runGCPurge(force bool) error {
 		count++
 	}
 
-	fmt.Printf("✓ Permanently deleted %d archived session(s).\n", count)
+	fmt.Printf("✓ Permanently deleted %d archived plan(s).\n", count)
 	return nil
 }
 
-// findGCCandidates loads all active sessions and evaluates each one against
-// the GC criteria, returning the list of sessions eligible for archival.
-func findGCCandidates(root string, cfg *config.Config, linkedDays, orphanDays int) ([]gcCandidate, error) {
-	sessions, err := session.LoadAllWithOptions(root, session.ParseOptions{
-		ExcerptSection: cfg.Sessions.ExcerptSection,
-	})
+// loadArchivedPlanFilenames returns the filenames of all .md files in plans/archive/.
+func loadArchivedPlanFilenames(root string) ([]string, error) {
+	archiveDir := plan.ArchiveDir(root)
+	entries, err := os.ReadDir(archiveDir)
 	if err != nil {
-		// Non-fatal: LoadAllWithOptions returns partial results on parse errors.
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read archive dir: %w", err)
+	}
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+			files = append(files, e.Name())
+		}
+	}
+	return files, nil
+}
+
+// findGCCandidates loads all active plans and evaluates each one against
+// the GC criteria, returning the list of plans eligible for archival.
+func findGCCandidates(root string, cfg *config.Config, linkedDays, orphanDays int) ([]gcCandidate, error) {
+	plans, err := plan.LoadAll(root)
+	if err != nil {
+		// Non-fatal: LoadAll returns partial results on parse errors.
 		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 	}
 
@@ -236,16 +253,20 @@ func findGCCandidates(root string, cfg *config.Config, linkedDays, orphanDays in
 	now := time.Now()
 	var candidates []gcCandidate
 
-	for _, s := range sessions {
-		if len(s.Tasks) == 0 {
+	for _, p := range plans {
+		planSlug := strings.TrimSuffix(p.Filename, ".md")
+
+		tasks, _ := store.List(task.Filter{Plan: planSlug})
+
+		if len(tasks) == 0 {
 			// Weak candidate: no linked tasks — age-based.
-			if s.Date == nil {
+			if p.Date == nil {
 				continue
 			}
-			days := int(now.Sub(*s.Date).Hours() / 24)
+			days := int(now.Sub(*p.Date).Hours() / 24)
 			if days >= orphanDays {
 				candidates = append(candidates, gcCandidate{
-					sess:    s,
+					p:       p,
 					reason:  fmt.Sprintf("no linked tasks, %d days old", days),
 					ageDays: days,
 					tier:    gcTierWeak,
@@ -254,22 +275,16 @@ func findGCCandidates(root string, cfg *config.Config, linkedDays, orphanDays in
 			continue
 		}
 
-		// Has linked tasks — determine if all are terminal (done/cancelled).
-		allTerminal := true
+		// Has linked tasks — check for active (protected) tasks.
 		hasActive := false
+		allDone := true
 		var latestCompletion *time.Time
 
-		for _, taskFilename := range s.Tasks {
-			t, err := store.Get(taskFilename)
-			if err != nil {
-				// Task file not found or ambiguous: treat as terminal so it
-				// does not block archival of the session.
-				continue
-			}
+		for _, t := range tasks {
 			switch t.Status {
 			case task.StatusOpen, task.StatusInProgress:
 				hasActive = true
-				allTerminal = false
+				allDone = false
 			}
 			if t.CompletedAt != nil {
 				if latestCompletion == nil || t.CompletedAt.After(*latestCompletion) {
@@ -284,18 +299,23 @@ func findGCCandidates(root string, cfg *config.Config, linkedDays, orphanDays in
 			continue
 		}
 
-		if !allTerminal {
+		if !allDone {
 			continue
 		}
 
-		// Strong candidate: all tasks terminal — use completion time or session date.
+		// Only distilled plans qualify as strong candidates.
+		if !p.Distilled {
+			continue
+		}
+
+		// Strong candidate: distilled + all tasks done.
 		var refTime time.Time
 		var reasonSuffix string
 		if latestCompletion != nil {
 			refTime = *latestCompletion
 			reasonSuffix = fmt.Sprintf("%d days since last task completed", int(now.Sub(refTime).Hours()/24))
-		} else if s.Date != nil {
-			refTime = *s.Date
+		} else if p.Date != nil {
+			refTime = *p.Date
 			reasonSuffix = fmt.Sprintf("%d days old (no completed_at recorded)", int(now.Sub(refTime).Hours()/24))
 		} else {
 			continue
@@ -304,8 +324,8 @@ func findGCCandidates(root string, cfg *config.Config, linkedDays, orphanDays in
 		days := int(now.Sub(refTime).Hours() / 24)
 		if days >= linkedDays {
 			candidates = append(candidates, gcCandidate{
-				sess:    s,
-				reason:  fmt.Sprintf("all linked tasks done/cancelled, %s", reasonSuffix),
+				p:       p,
+				reason:  fmt.Sprintf("distilled, all tasks done, %s", reasonSuffix),
 				ageDays: days,
 				tier:    gcTierStrong,
 			})
@@ -327,7 +347,7 @@ func printGCCandidates(candidates []gcCandidate, linkedDays, orphanDays int) {
 		}
 	}
 
-	fmt.Printf("GC candidates (%d session(s)):\n", len(candidates))
+	fmt.Printf("GC candidates (%d plan(s)):\n", len(candidates))
 	fmt.Printf("  Thresholds: linked-days=%d, orphan-days=%d\n\n", linkedDays, orphanDays)
 
 	for _, c := range candidates {
@@ -335,16 +355,13 @@ func printGCCandidates(candidates []gcCandidate, linkedDays, orphanDays int) {
 		if c.tier == gcTierWeak {
 			tier = "weak"
 		}
-		fmt.Printf("  [%s] %s\n", tier, c.sess.Filename)
+		fmt.Printf("  [%s] %s\n", tier, c.p.Filename)
 		fmt.Printf("        Reason : %s\n", c.reason)
-		if len(c.sess.Tasks) > 0 {
-			fmt.Printf("        Tasks  : %s\n", strings.Join(c.sess.Tasks, ", "))
-		}
 		fmt.Println()
 	}
 
 	if strong > 0 {
-		fmt.Printf("  %d strong candidate(s): linked tasks all done/cancelled\n", strong)
+		fmt.Printf("  %d strong candidate(s): distilled + all tasks done\n", strong)
 	}
 	if weak > 0 {
 		fmt.Printf("  %d weak candidate(s):   no linked tasks, aged out\n", weak)

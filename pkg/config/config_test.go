@@ -10,8 +10,8 @@ import (
 func TestDefault(t *testing.T) {
 	cfg := Default("my-project")
 
-	if cfg.Version != "1" {
-		t.Errorf("expected version '1', got %q", cfg.Version)
+	if cfg.Version != "2" {
+		t.Errorf("expected version '2', got %q", cfg.Version)
 	}
 	if cfg.Project != "my-project" {
 		t.Errorf("expected project 'my-project', got %q", cfg.Project)
@@ -19,8 +19,8 @@ func TestDefault(t *testing.T) {
 	if cfg.AgentsFile != "AGENTS.md" {
 		t.Errorf("expected agents_file 'AGENTS.md', got %q", cfg.AgentsFile)
 	}
-	if len(cfg.Sessions.SummarySections) == 0 {
-		t.Error("expected non-empty summary_sections")
+	if len(cfg.Plans.SummarySections) == 0 {
+		t.Error("expected non-empty plans.summary_sections")
 	}
 	if cfg.Privacy.FilterPatterns == nil {
 		t.Error("expected filter_patterns to be non-nil slice")
@@ -42,8 +42,8 @@ func TestLoad_FileNotExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error when config missing, got: %v", err)
 	}
-	if cfg.Version != "1" {
-		t.Errorf("expected default version '1', got %q", cfg.Version)
+	if cfg.Version != "2" {
+		t.Errorf("expected default version '2', got %q", cfg.Version)
 	}
 	if cfg.Project != filepath.Base(dir) {
 		t.Errorf("expected project %q, got %q", filepath.Base(dir), cfg.Project)
@@ -54,11 +54,11 @@ func TestLoad_ValidFile(t *testing.T) {
 	dir := t.TempDir()
 
 	raw := `{
-		"version": "1",
+		"version": "2",
 		"project": "test-proj",
 		"agents_file": "CLAUDE.md",
-		"sessions": {
-			"summary_sections": ["Summary", "Decisions", "Action Items"]
+		"plans": {
+			"summary_sections": ["Background", "Spec", "Goals"]
 		},
 		"privacy": {
 			"filter_patterns": ["sk-[a-zA-Z0-9]+"]
@@ -84,8 +84,8 @@ func TestLoad_ValidFile(t *testing.T) {
 	if cfg.AgentsFile != "CLAUDE.md" {
 		t.Errorf("expected agents_file 'CLAUDE.md', got %q", cfg.AgentsFile)
 	}
-	if len(cfg.Sessions.SummarySections) != 3 {
-		t.Errorf("expected 3 summary_sections, got %d", len(cfg.Sessions.SummarySections))
+	if len(cfg.Plans.SummarySections) != 3 {
+		t.Errorf("expected 3 plans.summary_sections, got %d", len(cfg.Plans.SummarySections))
 	}
 	if len(cfg.Privacy.FilterPatterns) != 1 {
 		t.Errorf("expected 1 filter_pattern, got %d", len(cfg.Privacy.FilterPatterns))
@@ -128,14 +128,14 @@ func TestLoad_AppliesDefaults(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if cfg.Version != "1" {
-		t.Errorf("expected default version '1', got %q", cfg.Version)
+	if cfg.Version != "2" {
+		t.Errorf("expected default version '2', got %q", cfg.Version)
 	}
 	if cfg.AgentsFile != "AGENTS.md" {
 		t.Errorf("expected default agents_file 'AGENTS.md', got %q", cfg.AgentsFile)
 	}
-	if len(cfg.Sessions.SummarySections) == 0 {
-		t.Error("expected default summary_sections to be applied")
+	if len(cfg.Plans.SummarySections) == 0 {
+		t.Error("expected default plans.summary_sections to be applied")
 	}
 	if cfg.Privacy.FilterPatterns == nil {
 		t.Error("expected filter_patterns to be non-nil after defaults")
@@ -215,11 +215,11 @@ func TestLoad_GitAutoPushTrue(t *testing.T) {
 func TestSave_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	original := Config{
-		Version:    "1",
+		Version:    "2",
 		Project:    "roundtrip-proj",
 		AgentsFile: "CLAUDE.md",
-		Sessions: SessionsConfig{
-			SummarySections: []string{"Summary", "Key Decisions", "Action Items"},
+		Plans: PlansConfig{
+			SummarySections: []string{"Background", "Spec", "Goals"},
 		},
 		Privacy: PrivacyConfig{
 			FilterPatterns: []string{`sk-[a-zA-Z0-9]+`, `ghp_[a-zA-Z0-9]+`},
@@ -244,13 +244,13 @@ func TestSave_RoundTrip(t *testing.T) {
 	if loaded.AgentsFile != original.AgentsFile {
 		t.Errorf("agents_file mismatch: got %q, want %q", loaded.AgentsFile, original.AgentsFile)
 	}
-	if len(loaded.Sessions.SummarySections) != len(original.Sessions.SummarySections) {
-		t.Errorf("summary_sections length mismatch: got %d, want %d",
-			len(loaded.Sessions.SummarySections), len(original.Sessions.SummarySections))
+	if len(loaded.Plans.SummarySections) != len(original.Plans.SummarySections) {
+		t.Errorf("plans.summary_sections length mismatch: got %d, want %d",
+			len(loaded.Plans.SummarySections), len(original.Plans.SummarySections))
 	}
-	for i, s := range original.Sessions.SummarySections {
-		if loaded.Sessions.SummarySections[i] != s {
-			t.Errorf("summary_sections[%d]: got %q, want %q", i, loaded.Sessions.SummarySections[i], s)
+	for i, s := range original.Plans.SummarySections {
+		if loaded.Plans.SummarySections[i] != s {
+			t.Errorf("plans.summary_sections[%d]: got %q, want %q", i, loaded.Plans.SummarySections[i], s)
 		}
 	}
 	if len(loaded.Privacy.FilterPatterns) != len(original.Privacy.FilterPatterns) {
@@ -292,290 +292,5 @@ func TestSave_CreatesDirectoryIfMissing(t *testing.T) {
 
 	if _, err := os.Stat(ConfigPath(nested)); os.IsNotExist(err) {
 		t.Fatal("expected config file to be created in nested directory")
-	}
-}
-
-// --- Migrate -----------------------------------------------------------------
-
-func TestMigrate_NoFile(t *testing.T) {
-	dir := t.TempDir()
-
-	changed, err := Migrate(dir)
-	if err != nil {
-		t.Fatalf("expected no error when config missing, got: %v", err)
-	}
-	if changed {
-		t.Error("expected changed=false when config.json does not exist")
-	}
-}
-
-func TestMigrate_CompleteConfig(t *testing.T) {
-	dir := t.TempDir()
-
-	// Write a fully-populated config.json (all expected keys present).
-	cfg := Default("complete-proj")
-	if err := Save(dir, cfg); err != nil {
-		t.Fatalf("Save failed: %v", err)
-	}
-
-	changed, err := Migrate(dir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if changed {
-		t.Error("expected changed=false for a complete config.json")
-	}
-}
-
-func TestMigrate_MissingSessionsKey(t *testing.T) {
-	dir := t.TempDir()
-
-	// Old-style config using "save" instead of "sessions" — "sessions" key absent.
-	raw := `{
-		"version": "1",
-		"project": "old-proj",
-		"agents_file": "AGENTS.md",
-		"save": {
-			"summary_sections": ["Summary"],
-			"excerpt_section": "Summary"
-		},
-		"tasks": {
-			"default_status": "open",
-			"default_priority": "medium",
-			"summary_sections": ["What"],
-			"excerpt_section": "What",
-			"sections": []
-		}
-	}`
-
-	cfgDir := filepath.Join(dir, DirName)
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(cfgDir, ConfigFileName), []byte(raw), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	changed, err := Migrate(dir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !changed {
-		t.Fatal("expected changed=true when 'sessions' key is absent")
-	}
-
-	// Verify the migrated file now contains the "sessions" key.
-	reloaded, err := Load(dir)
-	if err != nil {
-		t.Fatalf("Load after migration failed: %v", err)
-	}
-	if reloaded.Sessions.ExcerptSection == "" {
-		t.Error("expected sessions.excerpt_section to be set after migration")
-	}
-	if len(reloaded.Sessions.Sections) == 0 {
-		t.Error("expected sessions.sections to be non-empty after migration")
-	}
-}
-
-func TestMigrate_MissingExcerptSection(t *testing.T) {
-	dir := t.TempDir()
-
-	// Config with "sessions" key but missing "excerpt_section" inside it.
-	raw := `{
-		"version": "1",
-		"project": "partial-proj",
-		"agents_file": "AGENTS.md",
-		"sessions": {
-			"summary_sections": ["Summary", "Key Decisions"],
-			"sections": []
-		},
-		"tasks": {
-			"default_status": "open",
-			"default_priority": "medium",
-			"summary_sections": ["What"],
-			"excerpt_section": "What",
-			"sections": []
-		}
-	}`
-
-	cfgDir := filepath.Join(dir, DirName)
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(cfgDir, ConfigFileName), []byte(raw), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	changed, err := Migrate(dir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !changed {
-		t.Fatal("expected changed=true when sessions.excerpt_section is absent")
-	}
-
-	reloaded, err := Load(dir)
-	if err != nil {
-		t.Fatalf("Load after migration failed: %v", err)
-	}
-	if reloaded.Sessions.ExcerptSection != "Summary" {
-		t.Errorf("expected sessions.excerpt_section='Summary', got %q", reloaded.Sessions.ExcerptSection)
-	}
-}
-
-func TestMigrate_MissingTasksExcerptSection(t *testing.T) {
-	dir := t.TempDir()
-
-	// Config with "tasks" key but missing "excerpt_section" inside it.
-	raw := `{
-		"version": "1",
-		"project": "task-partial",
-		"agents_file": "AGENTS.md",
-		"sessions": {
-			"summary_sections": ["Summary"],
-			"excerpt_section": "Summary",
-			"sections": []
-		},
-		"tasks": {
-			"default_status": "open",
-			"default_priority": "medium",
-			"summary_sections": ["What"],
-			"sections": []
-		}
-	}`
-
-	cfgDir := filepath.Join(dir, DirName)
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(cfgDir, ConfigFileName), []byte(raw), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	changed, err := Migrate(dir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !changed {
-		t.Fatal("expected changed=true when tasks.excerpt_section is absent")
-	}
-
-	reloaded, err := Load(dir)
-	if err != nil {
-		t.Fatalf("Load after migration failed: %v", err)
-	}
-	if reloaded.Tasks.ExcerptSection != "What" {
-		t.Errorf("expected tasks.excerpt_section='What', got %q", reloaded.Tasks.ExcerptSection)
-	}
-}
-
-func TestMigrate_PreservesExistingValues(t *testing.T) {
-	dir := t.TempDir()
-
-	// Config with custom values — Migrate should not overwrite them.
-	raw := `{
-		"version": "1",
-		"project": "custom-proj",
-		"agents_file": "CLAUDE.md",
-		"sessions": {
-			"summary_sections": ["Overview", "Decisions"],
-			"excerpt_section": "Overview",
-			"sections": []
-		},
-		"tasks": {
-			"default_status": "open",
-			"default_priority": "high",
-			"summary_sections": ["What"],
-			"excerpt_section": "What",
-			"sections": []
-		},
-		"gc": {
-			"linked_task_done_days": 30,
-			"orphan_session_days": 90
-		}
-	}`
-
-	cfgDir := filepath.Join(dir, DirName)
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(cfgDir, ConfigFileName), []byte(raw), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	changed, err := Migrate(dir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if changed {
-		t.Error("expected changed=false when all keys are already present")
-	}
-
-	// Double-check the custom values survived.
-	reloaded, err := Load(dir)
-	if err != nil {
-		t.Fatalf("Load failed: %v", err)
-	}
-	if reloaded.Sessions.ExcerptSection != "Overview" {
-		t.Errorf("excerpt_section overwritten: got %q, want 'Overview'", reloaded.Sessions.ExcerptSection)
-	}
-	if reloaded.AgentsFile != "CLAUDE.md" {
-		t.Errorf("agents_file overwritten: got %q, want 'CLAUDE.md'", reloaded.AgentsFile)
-	}
-	if reloaded.Tasks.DefaultPriority != "high" {
-		t.Errorf("tasks.default_priority overwritten: got %q, want 'high'", reloaded.Tasks.DefaultPriority)
-	}
-}
-
-func TestMigrate_InvalidJSON(t *testing.T) {
-	dir := t.TempDir()
-
-	cfgDir := filepath.Join(dir, DirName)
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(cfgDir, ConfigFileName), []byte("{not valid json"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Malformed JSON should not return an error — Migrate leaves the file alone.
-	changed, err := Migrate(dir)
-	if err != nil {
-		t.Fatalf("expected no error for invalid JSON, got: %v", err)
-	}
-	if changed {
-		t.Error("expected changed=false for invalid JSON (file should be left alone)")
-	}
-}
-
-func TestMigrate_Idempotent(t *testing.T) {
-	dir := t.TempDir()
-
-	// Start with a config that needs migration.
-	raw := `{"project": "idempotent-proj"}`
-
-	cfgDir := filepath.Join(dir, DirName)
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(cfgDir, ConfigFileName), []byte(raw), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	changed1, err := Migrate(dir)
-	if err != nil {
-		t.Fatalf("first Migrate failed: %v", err)
-	}
-	if !changed1 {
-		t.Fatal("expected changed=true on first migration")
-	}
-
-	// Running Migrate a second time must be a no-op.
-	changed2, err := Migrate(dir)
-	if err != nil {
-		t.Fatalf("second Migrate failed: %v", err)
-	}
-	if changed2 {
-		t.Error("expected changed=false on second migration (idempotent)")
 	}
 }

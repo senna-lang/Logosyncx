@@ -14,10 +14,10 @@ import (
 
 var syncCmd = &cobra.Command{
 	Use:   "sync",
-	Short: "Rebuild session and task indexes from the filesystem",
+	Short: "Rebuild plan and task indexes from the filesystem",
 	Long: `Delete and rebuild index.jsonl and task-index.jsonl by scanning every
-file under .logosyncx/sessions/ and .logosyncx/tasks/ respectively.
-Run this after manually editing, adding, or deleting session or task files
+file under .logosyncx/plans/ and .logosyncx/tasks/ respectively.
+Run this after manually editing, adding, or deleting plan or task files
 to bring both indexes back in sync with the filesystem.
 
 When git.auto_push is false (the default), no git operations are performed.
@@ -37,33 +37,24 @@ func runSync() error {
 		return err
 	}
 
-	// Migrate config.json first so that subsequent Load sees up-to-date fields.
-	changed, migrateErr := config.Migrate(root)
-	if migrateErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not migrate config (%v)\n", migrateErr)
-	} else if changed {
-		fmt.Println("✓ config.json migrated with new default fields")
-	}
-
-	// Load config up front so git automation settings are available throughout.
 	cfg, err := config.Load(root)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not load config (%v) — using defaults\n", err)
 		cfg = config.Config{}
 	}
 
-	// --- sessions ------------------------------------------------------------
-	fmt.Println("Rebuilding session index from sessions/...")
-	n, err := index.Rebuild(root, cfg.Sessions.ExcerptSection)
+	// --- plans ---------------------------------------------------------------
+	fmt.Println("Rebuilding plan index from plans/...")
+	n, err := index.Rebuild(root, cfg.Plans.ExcerptSection)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 	}
-	fmt.Printf("Done. %d sessions indexed.\n", n)
+	fmt.Printf("Done. %d plans indexed.\n", n)
 
 	if cfg.Git.AutoPush {
-		sessionIndexPath := index.FilePath(root)
-		if gitErr := gitutil.Add(root, sessionIndexPath); gitErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: git add failed for session index (%v) — stage the file manually\n", gitErr)
+		planIndexPath := index.FilePath(root)
+		if gitErr := gitutil.Add(root, planIndexPath); gitErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: git add failed for plan index (%v) — stage the file manually\n", gitErr)
 		}
 	}
 

@@ -19,10 +19,10 @@ var suppressUpdateCheck bool
 var rootCmd = &cobra.Command{
 	Use:   "logos",
 	Short: "AI agent conversation context manager for git repositories",
-	Long: `Logosyncx (logos) is a CLI tool for managing AI agent conversation context
-in git repositories. It lets agents save, search, and retrieve past session
-summaries — enabling team-wide context sharing without external databases
-or embedding servers.`,
+	Long: `Logosyncx (logos) is a CLI tool for managing AI agent plans and tasks
+in git repositories. It lets agents save plans, track tasks, distill knowledge,
+and search past context — enabling team-wide context sharing without external
+databases or embedding servers.`,
 	// PersistentPostRun fires after every subcommand (including nested ones).
 	// It performs a lightweight update check and prints a one-line hint to
 	// stderr when a newer version is available.
