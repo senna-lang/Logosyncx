@@ -126,13 +126,9 @@ func matchesFilter(t *Task, f Filter) bool {
 	}
 
 	if f.Blocked {
-		// A Task is blocked when it has at least one depends_on seq that is
-		// not yet done.  Since matchesFilter works on in-memory *Task values
-		// (which don't carry the full task set), we rely on the caller to
-		// have pre-set a sentinel field.  For now we surface the field only
-		// through the JSON path (matchesJSONFilter), so always pass here.
-		// The JSON path (ApplyToJSON) uses e.Blocked which is set by the store.
-		_ = f.Blocked
+		if !t.Blocked {
+			return false
+		}
 	}
 
 	return true

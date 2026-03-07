@@ -191,7 +191,9 @@ func Write(projectRoot string, p Plan) (string, error) {
 }
 
 // Marshal serialises a Plan to its markdown representation (YAML frontmatter
-// only — body is omitted since Write produces scaffold files).
+// followed by the body when non-empty). Write calls Marshal to produce scaffold
+// files (body empty), while other callers such as logos distill use it to
+// rewrite an existing plan preserving its body.
 func Marshal(p Plan) ([]byte, error) {
 	fm, err := yaml.Marshal(p)
 	if err != nil {
@@ -202,6 +204,12 @@ func Marshal(p Plan) ([]byte, error) {
 	buf.WriteString(frontmatterSep + "\n")
 	buf.Write(fm)
 	buf.WriteString(frontmatterSep + "\n")
+	if p.Body != "" {
+		if !strings.HasPrefix(p.Body, "\n") {
+			buf.WriteByte('\n')
+		}
+		buf.WriteString(p.Body)
+	}
 	return buf.Bytes(), nil
 }
 

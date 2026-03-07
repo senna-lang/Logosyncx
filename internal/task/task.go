@@ -61,6 +61,7 @@ type Task struct {
 
 	// Derived fields — not written to frontmatter.
 	DirPath string `yaml:"-"` // absolute path to the task's directory (set by store)
+	Blocked bool   `yaml:"-"` // true when at least one depends_on seq is not yet done
 	Excerpt string `yaml:"-"` // first excerptMaxRunes runes of the excerpt section
 	Body    string `yaml:"-"` // full markdown body (everything after frontmatter)
 }

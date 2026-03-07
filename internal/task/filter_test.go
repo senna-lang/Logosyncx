@@ -324,6 +324,57 @@ func TestApply_KeywordFilter_Empty_MatchesAll(t *testing.T) {
 
 // --- Apply: Blocked filter (JSON path) ---------------------------------------
 
+func TestApply_BlockedFilter_InMemory(t *testing.T) {
+	blockedTask := &Task{
+		ID:       "t-1",
+		Title:    "blocked-task",
+		Status:   StatusOpen,
+		Priority: PriorityMedium,
+		Tags:     nil,
+		Blocked:  true,
+	}
+	freeTask := &Task{
+		ID:       "t-2",
+		Title:    "free-task",
+		Status:   StatusOpen,
+		Priority: PriorityMedium,
+		Tags:     nil,
+		Blocked:  false,
+	}
+	tasks := []*Task{blockedTask, freeTask}
+
+	got := Apply(tasks, Filter{Blocked: true})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 blocked task, got %d", len(got))
+	}
+	if got[0].Title != "blocked-task" {
+		t.Errorf("expected 'blocked-task', got %q", got[0].Title)
+	}
+}
+
+func TestApply_BlockedFilter_False_MatchesAll(t *testing.T) {
+	tasks := []*Task{
+		{ID: "t-1", Title: "blocked", Tags: nil, Blocked: true},
+		{ID: "t-2", Title: "unblocked", Tags: nil, Blocked: false},
+	}
+	// Blocked: false means "no constraint on blocked"
+	got := Apply(tasks, Filter{Blocked: false})
+	if len(got) != 2 {
+		t.Errorf("Blocked=false should match all tasks, got %d", len(got))
+	}
+}
+
+func TestApply_BlockedFilter_NoBlockedTasks_ReturnsEmpty(t *testing.T) {
+	tasks := []*Task{
+		{ID: "t-1", Title: "free-a", Tags: nil, Blocked: false},
+		{ID: "t-2", Title: "free-b", Tags: nil, Blocked: false},
+	}
+	got := Apply(tasks, Filter{Blocked: true})
+	if len(got) != 0 {
+		t.Errorf("expected 0 results when no tasks are blocked, got %d", len(got))
+	}
+}
+
 func TestFilter_Blocked(t *testing.T) {
 	entries := []TaskJSON{
 		{ID: "t-1", Title: "blocked-task", Status: StatusOpen, Priority: PriorityMedium,

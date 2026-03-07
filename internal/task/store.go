@@ -467,14 +467,10 @@ func (s *Store) loadAll() ([]*Task, error) {
 		planTasks, parseErrs := s.loadPlanTasks(planGroupDir)
 		errs = append(errs, parseErrs...)
 
-		// Compute Blocked for each task in this plan group.
+		// Compute Blocked for each task in this plan group and set it on
+		// the Task struct so that matchesFilter (in-memory path) can use it.
 		for _, t := range planTasks {
-			if IsBlocked(t, planTasks) {
-				// We store Blocked only in the JSON representation;
-				// the Task struct itself doesn't carry it.
-				// No-op here — ToJSON() / FromTask() will compute it on demand.
-				_ = t
-			}
+			t.Blocked = IsBlocked(t, planTasks)
 		}
 		tasks = append(tasks, planTasks...)
 	}

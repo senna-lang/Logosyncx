@@ -169,6 +169,90 @@ tasks_dir: .logosyncx/tasks/20260304-fresh-plan
 	}
 }
 
+func TestMarshal_PreservesBodyContent(t *testing.T) {
+	date := time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
+	body := "\n## Background\n\nThis is the background section.\n\n## Spec\n\nDo the thing.\n"
+	original := Plan{
+		ID:       "abc123",
+		Date:     &date,
+		Topic:    "body-round-trip-test",
+		Tags:     []string{"go", "test"},
+		Agent:    "claude-code",
+		TasksDir: ".logosyncx/tasks/20260304-body-round-trip-test",
+		Body:     body,
+	}
+
+	data, err := Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	parsed, err := Parse("20260304-body-round-trip-test.md", data)
+	if err != nil {
+		t.Fatalf("Parse after Marshal failed: %v", err)
+	}
+
+	if parsed.Body != body {
+		t.Errorf("Body not preserved.\ngot:  %q\nwant: %q", parsed.Body, body)
+	}
+}
+
+func TestMarshal_EmptyBody_NoTrailingContent(t *testing.T) {
+	date := time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
+	p := Plan{
+		ID:       "abc123",
+		Date:     &date,
+		Topic:    "scaffold-only",
+		TasksDir: ".logosyncx/tasks/20260304-scaffold-only",
+		Body:     "",
+	}
+
+	data, err := Marshal(p)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	content := string(data)
+	// With an empty body, the file must end with the closing "---\n".
+	if !strings.HasSuffix(strings.TrimRight(content, "\n"), "---") {
+		t.Errorf("expected scaffold to end with '---', got: %q", content)
+	}
+}
+
+func TestMarshal_BodyPreservedAfterDistilledUpdate(t *testing.T) {
+	// Regression test: logos distill calls Marshal after setting Distilled=true.
+	// The body must survive that rewrite.
+	date := time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
+	body := "\n## Background\n\nOriginal body content that must not be lost.\n"
+	p := Plan{
+		ID:        "def456",
+		Date:      &date,
+		Topic:     "distill-test",
+		TasksDir:  ".logosyncx/tasks/20260304-distill-test",
+		Distilled: false,
+		Body:      body,
+	}
+
+	// Simulate what logos distill does: set Distilled=true and rewrite.
+	p.Distilled = true
+	data, err := Marshal(p)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	parsed, err := Parse("20260304-distill-test.md", data)
+	if err != nil {
+		t.Fatalf("Parse after distill Marshal failed: %v", err)
+	}
+
+	if !parsed.Distilled {
+		t.Error("expected Distilled = true after rewrite")
+	}
+	if parsed.Body != body {
+		t.Errorf("Body destroyed by distill rewrite.\ngot:  %q\nwant: %q", parsed.Body, body)
+	}
+}
+
 func TestParse_MissingFrontmatter_ReturnsError(t *testing.T) {
 	_, err := Parse("bad.md", []byte("no frontmatter here"))
 	if err == nil {
