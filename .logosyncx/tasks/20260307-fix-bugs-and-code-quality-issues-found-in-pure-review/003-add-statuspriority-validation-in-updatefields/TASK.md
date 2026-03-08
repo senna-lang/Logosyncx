@@ -3,11 +3,12 @@ id: t-a6dd93
 date: 2026-03-07T21:31:11.257949+09:00
 title: Add status/priority validation in UpdateFields
 seq: 3
-status: open
+status: done
 priority: medium
 plan: 20260307-fix-bugs-and-code-quality-issues-found-in-pure-review
 tags: []
 assignee: ""
+completed_at: 2026-03-08T20:38:20.127332+09:00
 ---
 
 ## What

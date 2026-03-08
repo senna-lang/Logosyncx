@@ -5,20 +5,16 @@ package task
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
-	"unicode/utf8"
 
+	"github.com/senna-lang/logosyncx/internal/markdown"
 	"gopkg.in/yaml.v3"
 )
 
-const (
-	excerptMaxRunes = 300
-	frontmatterSep  = "---"
-)
+const frontmatterSep = "---"
 
 // Status represents the lifecycle state of a task.
 type Status string
@@ -126,7 +122,7 @@ func IsValidPriority(p Priority) bool {
 // TaskDirName returns the directory name for a task given its seq number and
 // title: e.g. seq=1, title="Add JWT middleware" → "001-add-jwt-middleware".
 func TaskDirName(seq int, title string) string {
-	return fmt.Sprintf("%03d-%s", seq, slugify(title))
+	return fmt.Sprintf("%03d-%s", seq, markdown.Slugify(title))
 }
 
 // ParseOptions controls optional behaviour of Parse.
@@ -148,7 +144,7 @@ func Parse(filename string, data []byte) (Task, error) {
 // extraction. Use this when the project's tasks.excerpt_section differs from
 // the default "What".
 func ParseWithOptions(filename string, data []byte, opts ParseOptions) (Task, error) {
-	fm, body, err := splitFrontmatter(data)
+	fm, body, err := markdown.SplitFrontmatter(data)
 	if err != nil {
 		return Task{}, fmt.Errorf("parse %s: %w", filename, err)
 	}
@@ -159,7 +155,11 @@ func ParseWithOptions(filename string, data []byte, opts ParseOptions) (Task, er
 	}
 
 	t.Body = string(body)
-	t.Excerpt = extractExcerpt(body, opts.ExcerptSection)
+	section := opts.ExcerptSection
+	if section == "" {
+		section = "What"
+	}
+	t.Excerpt = markdown.ExtractExcerpt(body, section)
 
 	return t, nil
 }
@@ -190,32 +190,11 @@ func Marshal(t Task) ([]byte, error) {
 // NOTE: The flat TASK.md layout is planned for Task 005 (store rewrite).
 func FileName(t Task) string {
 	date := t.Date.Format("2006-01-02")
-	slug := slugify(t.Title)
+	slug := markdown.Slugify(t.Title)
 	if slug == "" {
 		slug = "untitled"
 	}
 	return fmt.Sprintf("%s_%s.md", date, slug)
-}
-
-// slugify converts a string to a lower-case kebab-case filename segment.
-// Consecutive hyphens are collapsed; leading/trailing hyphens are removed.
-func slugify(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	var b strings.Builder
-	prevHyphen := false
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_':
-			b.WriteRune(r)
-			prevHyphen = false
-		case r == '-', r == ' ':
-			if !prevHyphen {
-				b.WriteRune('-')
-				prevHyphen = true
-			}
-		}
-	}
-	return strings.Trim(b.String(), "-")
 }
 
 // ExtractSections returns only the markdown sections whose headings match
@@ -236,7 +215,7 @@ func ExtractSections(body string, sectionNames []string) string {
 	currentLevel := 0
 
 	for _, line := range lines {
-		if heading, level, ok := parseHeading(line); ok {
+		if heading, level, ok := markdown.ParseHeading(line); ok {
 			if inWanted && level <= currentLevel {
 				inWanted = false
 			}
@@ -270,104 +249,4 @@ func normalizeStrings(s []string) []string {
 		return []string{}
 	}
 	return s
-}
-
-// splitFrontmatter separates YAML frontmatter from the markdown body.
-// The file must begin with "---\n"; the closing "---" ends the frontmatter block.
-func splitFrontmatter(data []byte) (frontmatter, body []byte, err error) {
-	text := string(data)
-	if !strings.HasPrefix(text, frontmatterSep) {
-		return nil, nil, errors.New("missing frontmatter: file must begin with '---'")
-	}
-
-	rest := text[len(frontmatterSep):]
-	if len(rest) > 0 && rest[0] == '\n' {
-		rest = rest[1:]
-	} else if len(rest) > 0 && rest[0] == '\r' && len(rest) > 1 && rest[1] == '\n' {
-		rest = rest[2:]
-	}
-
-	idx := strings.Index(rest, "\n"+frontmatterSep)
-	if idx == -1 {
-		return nil, nil, errors.New("missing closing '---' for frontmatter")
-	}
-
-	fm := rest[:idx]
-	remainder := rest[idx+1+len(frontmatterSep):]
-	if len(remainder) > 0 && remainder[0] == '\n' {
-		remainder = remainder[1:]
-	}
-
-	return []byte(fm), []byte(remainder), nil
-}
-
-// extractExcerpt returns the first excerptMaxRunes runes of the named excerpt
-// section's content (stripped of the heading line itself and blank lines).
-// The section is matched by name only — any heading level (h1–h6) is accepted.
-// The section ends when a heading at the same or higher level is encountered.
-// If excerptSection is empty it defaults to "What".
-// Falls back to the beginning of the body if the named section is not found.
-func extractExcerpt(body []byte, excerptSection string) string {
-	if excerptSection == "" {
-		excerptSection = "What"
-	}
-	text := string(body)
-	lines := strings.Split(text, "\n")
-
-	inSection := false
-	currentLevel := 0
-	var content strings.Builder
-
-	for _, line := range lines {
-		if heading, level, ok := parseHeading(line); ok {
-			if inSection {
-				if level <= currentLevel {
-					break
-				}
-			}
-			if strings.EqualFold(strings.TrimSpace(heading), excerptSection) {
-				inSection = true
-				currentLevel = level
-				continue
-			}
-		}
-		if inSection {
-			content.WriteString(line)
-			content.WriteByte('\n')
-		}
-	}
-
-	excerpt := strings.TrimSpace(content.String())
-
-	if excerpt == "" {
-		excerpt = strings.TrimSpace(text)
-	}
-
-	return truncateRunes(excerpt, excerptMaxRunes)
-}
-
-// parseHeading returns the heading text, its level (1–6), and true if the
-// line is a markdown ATX heading (e.g. "## What").
-func parseHeading(line string) (text string, level int, ok bool) {
-	trimmed := strings.TrimRight(line, " \t")
-	i := 0
-	for i < len(trimmed) && trimmed[i] == '#' {
-		i++
-	}
-	if i == 0 || i > 6 {
-		return "", 0, false
-	}
-	if i >= len(trimmed) || trimmed[i] != ' ' {
-		return "", 0, false
-	}
-	return strings.TrimSpace(trimmed[i+1:]), i, true
-}
-
-// truncateRunes truncates s to at most n runes, appending "…" if truncated.
-func truncateRunes(s string, n int) string {
-	if utf8.RuneCountInString(s) <= n {
-		return s
-	}
-	runes := []rune(s)
-	return string(runes[:n]) + "…"
 }

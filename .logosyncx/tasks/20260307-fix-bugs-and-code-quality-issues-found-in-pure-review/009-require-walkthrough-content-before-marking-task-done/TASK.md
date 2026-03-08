@@ -3,11 +3,12 @@ id: t-271590
 date: 2026-03-07T21:57:44.069206+09:00
 title: Require WALKTHROUGH content before marking task done
 seq: 9
-status: open
+status: done
 priority: medium
 plan: 20260307-fix-bugs-and-code-quality-issues-found-in-pure-review
 tags: []
 assignee: ""
+completed_at: 2026-03-08T20:46:24.906128+09:00
 ---
 
 ## What

@@ -3,11 +3,12 @@ id: t-184aca
 date: 2026-03-07T21:31:11.263931+09:00
 title: Extract shared markdown helpers to internal package
 seq: 4
-status: open
+status: done
 priority: medium
 plan: 20260307-fix-bugs-and-code-quality-issues-found-in-pure-review
 tags: []
 assignee: ""
+completed_at: 2026-03-08T20:43:44.114168+09:00
 ---
 
 ## What

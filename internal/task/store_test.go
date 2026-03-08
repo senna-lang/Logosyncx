@@ -549,7 +549,13 @@ func TestStore_UpdateFields_UpdatesAssignee(t *testing.T) {
 
 func TestStore_UpdateFields_Done_SetsCompletedAt(t *testing.T) {
 	_, store := setupStore(t)
-	createTask(t, store, "20260304-auth", "Completed task", "open", "medium", nil)
+	tk := createTask(t, store, "20260304-auth", "Completed task", "open", "medium", nil)
+
+	// Pre-write WALKTHROUGH.md with real content.
+	wtPath := filepath.Join(tk.DirPath, walkthroughFileName)
+	if err := os.WriteFile(wtPath, []byte("# Walkthrough\n\nContent.\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
 
 	before := time.Now()
 	if err := store.UpdateFields("", "completed-task", map[string]string{"status": "done"}); err != nil {
@@ -568,17 +574,49 @@ func TestStore_UpdateFields_Done_SetsCompletedAt(t *testing.T) {
 	}
 }
 
-func TestStore_UpdateFields_Done_CreatesWalkthrough(t *testing.T) {
+func TestStore_UpdateFields_Done_RequiresWalkthroughContent(t *testing.T) {
 	_, store := setupStore(t)
-	tk := createTask(t, store, "20260304-auth", "Walkthrough task", "open", "medium", nil)
+	createTask(t, store, "20260304-auth", "Walkthrough task", "open", "medium", nil)
 
-	if err := store.UpdateFields("", "walkthrough-task", map[string]string{"status": "done"}); err != nil {
-		t.Fatalf("UpdateFields: %v", err)
+	// No WALKTHROUGH.md yet — must be rejected.
+	err := store.UpdateFields("", "walkthrough-task", map[string]string{"status": "done"})
+	if err == nil {
+		t.Fatal("expected error when WALKTHROUGH.md has no content, got nil")
+	}
+	if !strings.Contains(err.Error(), "WALKTHROUGH.md") {
+		t.Errorf("expected 'WALKTHROUGH.md' in error, got: %v", err)
+	}
+}
+
+func TestStore_UpdateFields_Done_ScaffoldOnly_Rejected(t *testing.T) {
+	_, store := setupStore(t)
+	tk := createTask(t, store, "20260304-auth", "Scaffold only task", "open", "medium", nil)
+
+	// Write scaffold-only content (all HTML comment lines).
+	wtPath := filepath.Join(tk.DirPath, walkthroughFileName)
+	scaffold := "<!-- fill in this section -->\n<!-- another comment -->\n"
+	if err := os.WriteFile(wtPath, []byte(scaffold), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
 	}
 
+	err := store.UpdateFields("", "scaffold-only-task", map[string]string{"status": "done"})
+	if err == nil {
+		t.Fatal("expected error for scaffold-only WALKTHROUGH.md, got nil")
+	}
+}
+
+func TestStore_UpdateFields_Done_WithContent_Succeeds(t *testing.T) {
+	_, store := setupStore(t)
+	tk := createTask(t, store, "20260304-auth", "Content filled task", "open", "medium", nil)
+
+	// Write real content into WALKTHROUGH.md.
 	wtPath := filepath.Join(tk.DirPath, walkthroughFileName)
-	if _, err := os.Stat(wtPath); err != nil {
-		t.Errorf("WALKTHROUGH.md not created at %s: %v", wtPath, err)
+	if err := os.WriteFile(wtPath, []byte("# Walkthrough\n\nActual content here.\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if err := store.UpdateFields("", "content-filled-task", map[string]string{"status": "done"}); err != nil {
+		t.Fatalf("UpdateFields with content-filled WALKTHROUGH.md: %v", err)
 	}
 }
 
@@ -625,8 +663,12 @@ func TestStore_UpdateFields_InProgress_BlockedByDep_HardError(t *testing.T) {
 
 func TestStore_UpdateFields_InProgress_NotBlocked_WhenDepDone(t *testing.T) {
 	_, store := setupStore(t)
-	// Create dep task and mark it done.
-	createTask(t, store, "20260304-auth", "Dep task", "open", "medium", nil)
+	// Create dep task and mark it done (requires WALKTHROUGH.md with content).
+	depTask := createTask(t, store, "20260304-auth", "Dep task", "open", "medium", nil)
+	wtPath := filepath.Join(depTask.DirPath, walkthroughFileName)
+	if err := os.WriteFile(wtPath, []byte("# Walkthrough\n\nDone.\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile walkthrough: %v", err)
+	}
 	if err := store.UpdateFields("auth", "dep-task", map[string]string{"status": "done"}); err != nil {
 		t.Fatalf("mark dep done: %v", err)
 	}
@@ -646,6 +688,50 @@ func TestStore_UpdateFields_UnknownField_ReturnsError(t *testing.T) {
 	err := store.UpdateFields("", "field-test", map[string]string{"unknown": "value"})
 	if err == nil {
 		t.Fatal("expected error for unknown field, got nil")
+	}
+}
+
+func TestStore_UpdateFields_InvalidStatus_ReturnsError(t *testing.T) {
+	_, store := setupStore(t)
+	createTask(t, store, "20260304-auth", "Status validation", "open", "medium", nil)
+
+	err := store.UpdateFields("", "status-validation", map[string]string{"status": "typo"})
+	if err == nil {
+		t.Fatal("expected error for invalid status, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid status") {
+		t.Errorf("expected 'invalid status' in error, got: %v", err)
+	}
+
+	// File must be unchanged: status must still be open.
+	reloaded, getErr := store.GetByName("status-validation")
+	if getErr != nil {
+		t.Fatalf("GetByName after failed update: %v", getErr)
+	}
+	if reloaded.Status != StatusOpen {
+		t.Errorf("status was mutated: got %q, want %q", reloaded.Status, StatusOpen)
+	}
+}
+
+func TestStore_UpdateFields_InvalidPriority_ReturnsError(t *testing.T) {
+	_, store := setupStore(t)
+	createTask(t, store, "20260304-auth", "Priority validation", "open", "medium", nil)
+
+	err := store.UpdateFields("", "priority-validation", map[string]string{"priority": "urgent"})
+	if err == nil {
+		t.Fatal("expected error for invalid priority, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid priority") {
+		t.Errorf("expected 'invalid priority' in error, got: %v", err)
+	}
+
+	// File must be unchanged: priority must still be medium.
+	reloaded, getErr := store.GetByName("priority-validation")
+	if getErr != nil {
+		t.Fatalf("GetByName after failed update: %v", getErr)
+	}
+	if reloaded.Priority != PriorityMedium {
+		t.Errorf("priority was mutated: got %q, want %q", reloaded.Priority, PriorityMedium)
 	}
 }
 

@@ -31,15 +31,11 @@ func setupDistillProject(t *testing.T, topic string) (root, planSlug string) {
 	root = setupProjectWithPlan(t, p)
 	planSlug = strings.TrimSuffix(plan.FileName(p), ".md")
 
-	// Create a task, mark it done (creates WALKTHROUGH.md), then fill it.
+	// Create a task, write WALKTHROUGH.md content, then mark done.
 	if err := runTaskCreate(root, planSlug, "Test task one", "medium", nil, nil); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if err := runTaskUpdate("", "test-task-one", "done", "", ""); err != nil {
-		t.Fatalf("update task to done: %v", err)
-	}
 
-	// Write real content into WALKTHROUGH.md.
 	cfg, err := config.Load(root)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -52,6 +48,10 @@ func setupDistillProject(t *testing.T, topic string) (root, planSlug string) {
 	wtPath := filepath.Join(tasks[0].DirPath, "WALKTHROUGH.md")
 	if err := os.WriteFile(wtPath, []byte("# What I did\nImplemented the feature.\n"), 0o644); err != nil {
 		t.Fatalf("write WALKTHROUGH.md: %v", err)
+	}
+
+	if err := runTaskUpdate("", "test-task-one", "done", "", ""); err != nil {
+		t.Fatalf("update task to done: %v", err)
 	}
 
 	return root, planSlug
@@ -208,20 +208,27 @@ func TestDistill_NoWalkthroughs_Error(t *testing.T) {
 	root := setupProjectWithPlan(t, p)
 	planSlug := strings.TrimSuffix(plan.FileName(p), ".md")
 
-	// Create and mark done (creates WALKTHROUGH.md scaffold), then remove it.
+	// Create task, write WALKTHROUGH.md, mark done, then remove WALKTHROUGH.md.
 	if err := runTaskCreate(root, planSlug, "Done task", "medium", nil, nil); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if err := runTaskUpdate("", "done-task", "done", "", ""); err != nil {
-		t.Fatalf("update task to done: %v", err)
-	}
 
-	// Remove the WALKTHROUGH.md that was auto-created.
 	cfg, _ := config.Load(root)
 	store := task.NewStore(root, &cfg)
 	tasks, _ := store.List(task.Filter{Plan: planSlug})
 	if len(tasks) > 0 {
-		_ = os.Remove(filepath.Join(tasks[0].DirPath, "WALKTHROUGH.md"))
+		wtPath := filepath.Join(tasks[0].DirPath, "WALKTHROUGH.md")
+		_ = os.WriteFile(wtPath, []byte("# Walkthrough\n\nContent.\n"), 0o644)
+	}
+
+	if err := runTaskUpdate("", "done-task", "done", "", ""); err != nil {
+		t.Fatalf("update task to done: %v", err)
+	}
+
+	// Remove the WALKTHROUGH.md to simulate the "no walkthroughs" error case.
+	tasks2, _ := store.List(task.Filter{Plan: planSlug})
+	if len(tasks2) > 0 {
+		_ = os.Remove(filepath.Join(tasks2[0].DirPath, "WALKTHROUGH.md"))
 	}
 
 	err := runDistill(planSlug, false, false)

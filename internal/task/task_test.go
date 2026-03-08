@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/senna-lang/logosyncx/internal/markdown"
 )
 
 // --- helpers -----------------------------------------------------------------
@@ -313,7 +315,7 @@ func TestTask_TaskDirName_Format(t *testing.T) {
 
 func TestExtractExcerpt_FromWhatSection(t *testing.T) {
 	body := []byte("## What\nThis is the what section.\n\n## Why\nThis is why.\n")
-	got := extractExcerpt(body, "")
+	got := markdown.ExtractExcerpt(body, "What")
 	if !strings.Contains(got, "what section") {
 		t.Errorf("excerpt = %q, expected content from ## What", got)
 	}
@@ -321,7 +323,7 @@ func TestExtractExcerpt_FromWhatSection(t *testing.T) {
 
 func TestExtractExcerpt_FallbackToBody(t *testing.T) {
 	body := []byte("No headings here, just plain text.")
-	got := extractExcerpt(body, "")
+	got := markdown.ExtractExcerpt(body, "What")
 	if got == "" {
 		t.Error("expected non-empty excerpt via fallback")
 	}
@@ -329,7 +331,7 @@ func TestExtractExcerpt_FallbackToBody(t *testing.T) {
 
 func TestExtractExcerpt_EmptyWhatSection_FallsBack(t *testing.T) {
 	body := []byte("## What\n\n## Why\nThis is why.\n")
-	got := extractExcerpt(body, "")
+	got := markdown.ExtractExcerpt(body, "What")
 	if got == "" {
 		t.Error("expected non-empty excerpt via fallback when ## What is empty")
 	}
@@ -338,15 +340,15 @@ func TestExtractExcerpt_EmptyWhatSection_FallsBack(t *testing.T) {
 func TestExtractExcerpt_TruncatesLongContent(t *testing.T) {
 	long := strings.Repeat("a", 400)
 	body := []byte("## What\n" + long + "\n")
-	got := extractExcerpt(body, "")
-	if len([]rune(got)) > excerptMaxRunes+1 { // +1 for the ellipsis rune
-		t.Errorf("excerpt length = %d runes, expected at most %d", len([]rune(got)), excerptMaxRunes+1)
+	got := markdown.ExtractExcerpt(body, "What")
+	if len([]rune(got)) > markdown.ExcerptMaxRunes+1 { // +1 for the ellipsis rune
+		t.Errorf("excerpt length = %d runes, expected at most %d", len([]rune(got)), markdown.ExcerptMaxRunes+1)
 	}
 }
 
 func TestExtractExcerpt_ShortContentNotTruncated(t *testing.T) {
 	body := []byte("## What\nShort content.\n")
-	got := extractExcerpt(body, "")
+	got := markdown.ExtractExcerpt(body, "What")
 	if strings.HasSuffix(got, "…") {
 		t.Error("short content should not be truncated")
 	}
@@ -478,46 +480,46 @@ func TestToJSON_CopiesAllFields(t *testing.T) {
 // --- slugify -----------------------------------------------------------------
 
 func TestSlugify_LowerCase(t *testing.T) {
-	got := slugify("My Task")
+	got := markdown.Slugify("My Task")
 	if got != "my-task" {
-		t.Errorf("slugify = %q, want 'my-task'", got)
+		t.Errorf("markdown.Slugify = %q, want 'my-task'", got)
 	}
 }
 
 func TestSlugify_RemovesSpecialChars(t *testing.T) {
-	got := slugify("auth (v2): JWT!")
+	got := markdown.Slugify("auth (v2): JWT!")
 	for _, ch := range []string{"(", ")", "!", ":"} {
 		if strings.Contains(got, ch) {
-			t.Errorf("slugify(%q) = %q, special char %q should be removed", "auth (v2): JWT!", got, ch)
+			t.Errorf("markdown.Slugify(%q) = %q, special char %q should be removed", "auth (v2): JWT!", got, ch)
 		}
 	}
 }
 
 func TestSlugify_PreservesHyphens(t *testing.T) {
-	got := slugify("already-kebab")
+	got := markdown.Slugify("already-kebab")
 	if got != "already-kebab" {
-		t.Errorf("slugify = %q, want 'already-kebab'", got)
+		t.Errorf("markdown.Slugify = %q, want 'already-kebab'", got)
 	}
 }
 
 func TestSlugify_PreservesUnderscores(t *testing.T) {
-	got := slugify("with_underscore")
+	got := markdown.Slugify("with_underscore")
 	if got != "with_underscore" {
-		t.Errorf("slugify = %q, want 'with_underscore'", got)
+		t.Errorf("markdown.Slugify = %q, want 'with_underscore'", got)
 	}
 }
 
 func TestSlugify_EmptyString(t *testing.T) {
-	got := slugify("")
+	got := markdown.Slugify("")
 	if got != "" {
-		t.Errorf("slugify('') = %q, want ''", got)
+		t.Errorf("markdown.Slugify('') = %q, want ''", got)
 	}
 }
 
 func TestSlugify_CollapsesConsecutiveHyphens(t *testing.T) {
-	got := slugify("auth  refactor")
+	got := markdown.Slugify("auth  refactor")
 	if strings.Contains(got, "--") {
-		t.Errorf("slugify = %q, consecutive hyphens should be collapsed", got)
+		t.Errorf("markdown.Slugify = %q, consecutive hyphens should be collapsed", got)
 	}
 }
 
@@ -575,7 +577,7 @@ func TestExtractSections_EmptyList_ReturnsFullBody(t *testing.T) {
 // --- parseHeading ------------------------------------------------------------
 
 func TestParseHeading_H2(t *testing.T) {
-	text, level, ok := parseHeading("## Summary")
+	text, level, ok := markdown.ParseHeading("## Summary")
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
@@ -588,14 +590,14 @@ func TestParseHeading_H2(t *testing.T) {
 }
 
 func TestParseHeading_NotAHeading(t *testing.T) {
-	_, _, ok := parseHeading("plain text")
+	_, _, ok := markdown.ParseHeading("plain text")
 	if ok {
 		t.Error("expected ok=false for plain text")
 	}
 }
 
 func TestParseHeading_HashWithNoSpace_NotAHeading(t *testing.T) {
-	_, _, ok := parseHeading("##NoSpace")
+	_, _, ok := markdown.ParseHeading("##NoSpace")
 	if ok {
 		t.Error("expected ok=false when no space after #")
 	}
@@ -604,30 +606,30 @@ func TestParseHeading_HashWithNoSpace_NotAHeading(t *testing.T) {
 // --- truncateRunes -----------------------------------------------------------
 
 func TestTruncateRunes_ShortString(t *testing.T) {
-	got := truncateRunes("hello", 10)
+	got := markdown.TruncateRunes("hello", 10)
 	if got != "hello" {
-		t.Errorf("truncateRunes = %q, want 'hello'", got)
+		t.Errorf("markdown.TruncateRunes = %q, want 'hello'", got)
 	}
 }
 
 func TestTruncateRunes_ExactLength(t *testing.T) {
-	got := truncateRunes("hello", 5)
+	got := markdown.TruncateRunes("hello", 5)
 	if got != "hello" {
-		t.Errorf("truncateRunes = %q, want 'hello'", got)
+		t.Errorf("markdown.TruncateRunes = %q, want 'hello'", got)
 	}
 }
 
 func TestTruncateRunes_TooLong(t *testing.T) {
-	got := truncateRunes("hello world", 5)
+	got := markdown.TruncateRunes("hello world", 5)
 	if got != "hello…" {
-		t.Errorf("truncateRunes = %q, want 'hello…'", got)
+		t.Errorf("markdown.TruncateRunes = %q, want 'hello…'", got)
 	}
 }
 
 func TestTruncateRunes_MultiByte(t *testing.T) {
 	// Each Japanese character is 1 rune.
-	got := truncateRunes("日本語テスト", 3)
+	got := markdown.TruncateRunes("日本語テスト", 3)
 	if got != "日本語…" {
-		t.Errorf("truncateRunes = %q, want '日本語…'", got)
+		t.Errorf("markdown.TruncateRunes = %q, want '日本語…'", got)
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/senna-lang/logosyncx/internal/markdown"
 )
 
 // --- FileName ----------------------------------------------------------------
@@ -456,7 +458,7 @@ func TestSlugify_Basic(t *testing.T) {
 		{"mixed123Numbers", "mixed123numbers"},
 	}
 	for _, tc := range cases {
-		got := slugify(tc.input)
+		got := markdown.Slugify(tc.input)
 		if got != tc.want {
 			t.Errorf("slugify(%q) = %q, want %q", tc.input, got, tc.want)
 		}

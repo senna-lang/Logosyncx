@@ -29,7 +29,7 @@
 		"filter_patterns": []
 	},
 	"git": {
-		"auto_push": false
+		"auto_push": true
 	},
 	"gc": {
 		"linked_task_done_days": 30,

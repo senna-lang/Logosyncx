@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/senna-lang/logosyncx/internal/markdown"
 	"github.com/senna-lang/logosyncx/pkg/config"
 )
 
@@ -29,7 +30,7 @@ func setupTaskIndex(t *testing.T) (string, *Store) {
 func makeTaskEntry(id, title string, status Status, date time.Time) TaskJSON {
 	return TaskJSON{
 		ID:        id,
-		DirPath:   ".logosyncx/tasks/20260101-test/" + slugify(title),
+		DirPath:   ".logosyncx/tasks/20260101-test/" + markdown.Slugify(title),
 		Date:      date,
 		Title:     title,
 		Status:    status,

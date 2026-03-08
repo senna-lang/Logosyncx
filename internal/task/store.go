@@ -259,6 +259,10 @@ func (s *Store) UpdateFields(planPartial, nameOrPartial string, fields map[strin
 		case "status":
 			newStatus := Status(v)
 
+			if !IsValidStatus(newStatus) {
+				return fmt.Errorf("invalid status %q: must be one of open, in_progress, done", v)
+			}
+
 			if newStatus == StatusInProgress {
 				// Load sibling tasks to check dependencies.
 				planTasks, _ := s.loadPlanTasks(filepath.Dir(t.DirPath))
@@ -268,6 +272,10 @@ func (s *Store) UpdateFields(planPartial, nameOrPartial string, fields map[strin
 			}
 
 			if newStatus == StatusDone && t.Status != StatusDone {
+				wPath := filepath.Join(t.DirPath, walkthroughFileName)
+				if !walkthroughHasContent(wPath) {
+					return fmt.Errorf("WALKTHROUGH.md has no content: write WALKTHROUGH.md content first, then re-run")
+				}
 				now := time.Now()
 				t.CompletedAt = &now
 			}
@@ -275,7 +283,11 @@ func (s *Store) UpdateFields(planPartial, nameOrPartial string, fields map[strin
 			t.Status = newStatus
 
 		case "priority":
-			t.Priority = Priority(v)
+			newPriority := Priority(v)
+			if !IsValidPriority(newPriority) {
+				return fmt.Errorf("invalid priority %q: must be one of low, medium, high", v)
+			}
+			t.Priority = newPriority
 
 		case "assignee":
 			t.Assignee = v
@@ -619,6 +631,24 @@ func parseSeqPrefix(name string) int {
 		return 0
 	}
 	return n
+}
+
+// walkthroughHasContent reports whether the WALKTHROUGH.md at path exists and
+// contains at least one substantive line — a non-empty line that does not start
+// with "<!--" (HTML comment). Scaffold-only files (all HTML comment blocks)
+// return false.
+func walkthroughHasContent(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "<!--") {
+			return true
+		}
+	}
+	return false
 }
 
 // sortByDateDesc sorts tasks newest-first in-place.

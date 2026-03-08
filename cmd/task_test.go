@@ -95,17 +95,22 @@ func TestTaskUpdate_Done_CreatesWalkthrough(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	if err := runTaskUpdate("", "walkthrough-task", "done", "", ""); err != nil {
-		t.Fatalf("update to done: %v", err)
-	}
-
+	// Write WALKTHROUGH.md with real content before marking done.
 	tasks := loadAllTasks(t, dir)
 	if len(tasks) != 1 {
 		t.Fatalf("expected 1 task, got %d", len(tasks))
 	}
 	wtPath := filepath.Join(tasks[0].DirPath, "WALKTHROUGH.md")
+	if err := os.WriteFile(wtPath, []byte("# Walkthrough\n\nActual content.\n"), 0o644); err != nil {
+		t.Fatalf("write WALKTHROUGH.md: %v", err)
+	}
+
+	if err := runTaskUpdate("", "walkthrough-task", "done", "", ""); err != nil {
+		t.Fatalf("update to done: %v", err)
+	}
+
 	if _, err := os.Stat(wtPath); err != nil {
-		t.Errorf("WALKTHROUGH.md not created after marking done: %v", err)
+		t.Errorf("WALKTHROUGH.md not present after marking done: %v", err)
 	}
 }
 
@@ -405,12 +410,8 @@ func TestTaskWalkthrough_PrintContent(t *testing.T) {
 	if err := runTaskCreate(dir, testPlan, "Print walk task", "medium", nil, nil); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	// Mark done so WALKTHROUGH.md is created.
-	if err := runTaskUpdate("", "print-walk-task", "done", "", ""); err != nil {
-		t.Fatalf("update to done: %v", err)
-	}
 
-	// Write real content to WALKTHROUGH.md so it can be printed.
+	// Write WALKTHROUGH.md content before marking done.
 	tasks := loadAllTasks(t, dir)
 	if len(tasks) != 1 {
 		t.Fatalf("expected 1 task, got %d", len(tasks))
@@ -419,6 +420,11 @@ func TestTaskWalkthrough_PrintContent(t *testing.T) {
 	content := "# What I did\nFixed the bug by refactoring.\n"
 	if err := os.WriteFile(wtPath, []byte(content), 0o644); err != nil {
 		t.Fatalf("write WALKTHROUGH.md: %v", err)
+	}
+
+	// Mark done.
+	if err := runTaskUpdate("", "print-walk-task", "done", "", ""); err != nil {
+		t.Fatalf("update to done: %v", err)
 	}
 
 	out := captureStdout(t, func() {
