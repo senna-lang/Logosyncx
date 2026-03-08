@@ -7,7 +7,7 @@ tags:
 agent: claude-sonnet-4-6
 related: []
 tasks_dir: .logosyncx/tasks/20260308-add-walkthrough-template
-distilled: false
+distilled: true
 ---
 
 ## Background
