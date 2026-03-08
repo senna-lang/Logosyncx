@@ -367,10 +367,10 @@ func runInit() error {
 
 	// 2. Write default template files.
 	templates := map[string]string{
-		"plan.md":          defaultPlanTemplate,
-		"task.md":          defaultTaskTemplate,
-		"knowledge.md":     defaultKnowledgeTemplate,
-		"walkthrough.md":   defaultWalkthroughTemplate,
+		"plan.md":        defaultPlanTemplate,
+		"task.md":        defaultTaskTemplate,
+		"knowledge.md":   defaultKnowledgeTemplate,
+		"walkthrough.md": defaultWalkthroughTemplate,
 	}
 	for name, content := range templates {
 		path := filepath.Join(logosyncxDir, "templates", name)
