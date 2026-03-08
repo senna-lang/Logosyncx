@@ -35,7 +35,7 @@ func setupDistillProject(t *testing.T, topic string) (root, planSlug string) {
 	if err := runTaskCreate(root, planSlug, "Test task one", "medium", nil, nil); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if err := runTaskUpdate("", "test-task-one", "done", "", "", false); err != nil {
+	if err := runTaskUpdate("", "test-task-one", "done", "", ""); err != nil {
 		t.Fatalf("update task to done: %v", err)
 	}
 
@@ -212,7 +212,7 @@ func TestDistill_NoWalkthroughs_Error(t *testing.T) {
 	if err := runTaskCreate(root, planSlug, "Done task", "medium", nil, nil); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if err := runTaskUpdate("", "done-task", "done", "", "", false); err != nil {
+	if err := runTaskUpdate("", "done-task", "done", "", ""); err != nil {
 		t.Fatalf("update task to done: %v", err)
 	}
 

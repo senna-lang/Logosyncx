@@ -95,7 +95,7 @@ func TestTaskUpdate_Done_CreatesWalkthrough(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	if err := runTaskUpdate("", "walkthrough-task", "done", "", "", false); err != nil {
+	if err := runTaskUpdate("", "walkthrough-task", "done", "", ""); err != nil {
 		t.Fatalf("update to done: %v", err)
 	}
 
@@ -122,7 +122,7 @@ func TestTaskUpdate_NoFileMove(t *testing.T) {
 	}
 	originalDir := tasks[0].DirPath
 
-	if err := runTaskUpdate("", "stable-path", "in_progress", "", "", false); err != nil {
+	if err := runTaskUpdate("", "stable-path", "in_progress", "", ""); err != nil {
 		t.Fatalf("update to in_progress: %v", err)
 	}
 
@@ -143,7 +143,7 @@ func TestTaskUpdate_InProgress_BlockedByDep(t *testing.T) {
 		t.Fatalf("create dependent: %v", err)
 	}
 
-	err := runTaskUpdate("", "dependent-task", "in_progress", "", "", false)
+	err := runTaskUpdate("", "dependent-task", "in_progress", "", "")
 	if err == nil {
 		t.Fatal("expected error when moving blocked task to in_progress, got nil")
 	}
@@ -406,7 +406,7 @@ func TestTaskWalkthrough_PrintContent(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 	// Mark done so WALKTHROUGH.md is created.
-	if err := runTaskUpdate("", "print-walk-task", "done", "", "", false); err != nil {
+	if err := runTaskUpdate("", "print-walk-task", "done", "", ""); err != nil {
 		t.Fatalf("update to done: %v", err)
 	}
 

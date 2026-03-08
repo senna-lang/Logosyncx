@@ -134,7 +134,10 @@ cat .logosyncx/templates/task.md
 # 1. Mark task done
 logos task update --plan <plan-filename> --name <task-name> --status done
 
-# 2. Write WALKTHROUGH.md (use Write tool)
+# 2. Read the walkthrough template
+cat .logosyncx/templates/walkthrough.md
+
+# 3. Write WALKTHROUGH.md body directly using the Write tool
 logos task walkthrough --plan <plan-filename> --name <task-name>
 ` + "```" + `
 
@@ -242,6 +245,12 @@ const defaultTaskTemplate = `## What
 
 What is explicitly OUT of scope: -->
 
+## Acceptance Criteria
+
+<!-- This task is done when:
+- [ ] <observable behaviour or output>
+- [ ] <observable behaviour or output> -->
+
 ## Checklist
 
 <!-- Step-by-step implementation checklist.
@@ -255,11 +264,47 @@ What is explicitly OUT of scope: -->
 <!-- Supplementary notes, gotchas known upfront, references. -->
 `
 
+// defaultWalkthroughTemplate is written to templates/walkthrough.md on logos init.
+const defaultWalkthroughTemplate = `## Key Specification
+
+<!-- What spec, task description, or requirements drove this implementation?
+     Link to TASK.md sections, design docs, or paste the key constraints. -->
+
+## What Was Done
+
+<!-- Describe what was actually implemented or resolved. -->
+
+## How It Was Done
+
+<!-- Key steps, approach taken, alternatives considered. -->
+
+## Gotchas & Lessons Learned
+
+<!-- Anything that tripped you up, surprising behaviour, edge cases. -->
+
+## Reusable Patterns
+
+<!-- Code snippets, patterns, or conventions worth reusing. -->
+`
+
 // defaultKnowledgeTemplate is written to templates/knowledge.md on logos init.
 const defaultKnowledgeTemplate = `## Summary
 
 <!-- Concise summary of what was learned across all tasks.
      This is used as the knowledge excerpt in future lookups. -->
+
+## Implemented Features
+
+<!-- What was actually built or changed in this session?
+     For each feature/change, describe:
+     - Feature: <name>
+     - Spec: <what it does, key constraints, acceptance criteria>
+     - Files changed: <relevant files> -->
+
+## Key Specification
+
+<!-- What spec, task description, or requirements drove this implementation?
+     Link to TASK.md sections, design docs, or paste the key constraints. -->
 
 ## Key Learnings
 
@@ -322,9 +367,10 @@ func runInit() error {
 
 	// 2. Write default template files.
 	templates := map[string]string{
-		"plan.md":      defaultPlanTemplate,
-		"task.md":      defaultTaskTemplate,
-		"knowledge.md": defaultKnowledgeTemplate,
+		"plan.md":          defaultPlanTemplate,
+		"task.md":          defaultTaskTemplate,
+		"knowledge.md":     defaultKnowledgeTemplate,
+		"walkthrough.md":   defaultWalkthroughTemplate,
 	}
 	for name, content := range templates {
 		path := filepath.Join(logosyncxDir, "templates", name)

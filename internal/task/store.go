@@ -359,20 +359,12 @@ func IsBlocked(t *Task, planTasks []*Task) bool {
 	return false
 }
 
-// CreateWalkthroughScaffold writes a WALKTHROUGH.md scaffold into t.DirPath.
-// If the file already exists, it is left untouched (idempotent).
-func (s *Store) CreateWalkthroughScaffold(t *Task) error {
-	path := filepath.Join(t.DirPath, walkthroughFileName)
+// defaultWalkthroughBody is the fallback section content used when
+// .logosyncx/templates/walkthrough.md does not exist.
+const defaultWalkthroughBody = `## Key Specification
 
-	// Idempotent: do nothing if the file already exists.
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	}
-
-	content := fmt.Sprintf(`# Walkthrough: %s
-
-<!-- Auto-generated when this task was marked done. -->
-<!-- Fill in each section before running logos distill. -->
+<!-- What spec, task description, or requirements drove this implementation?
+     Link to TASK.md sections, design docs, or paste the key constraints. -->
 
 ## What Was Done
 
@@ -389,7 +381,33 @@ func (s *Store) CreateWalkthroughScaffold(t *Task) error {
 ## Reusable Patterns
 
 <!-- Code snippets, patterns, or conventions worth reusing. -->
-`, t.Title)
+`
+
+// readWalkthroughTemplate reads .logosyncx/templates/walkthrough.md from the
+// project root. Falls back to defaultWalkthroughBody if the file is missing.
+func (s *Store) readWalkthroughTemplate() string {
+	p := filepath.Join(s.projectRoot, ".logosyncx", "templates", "walkthrough.md")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return defaultWalkthroughBody
+	}
+	return string(data)
+}
+
+// CreateWalkthroughScaffold writes a WALKTHROUGH.md scaffold into t.DirPath.
+// If the file already exists, it is left untouched (idempotent).
+// The section body is read from .logosyncx/templates/walkthrough.md when
+// available, falling back to built-in defaults.
+func (s *Store) CreateWalkthroughScaffold(t *Task) error {
+	path := filepath.Join(t.DirPath, walkthroughFileName)
+
+	// Idempotent: do nothing if the file already exists.
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+
+	header := fmt.Sprintf("# Walkthrough: %s\n\n<!-- Auto-generated when this task was marked done. -->\n<!-- Fill in each section before running logos distill. -->\n\n", t.Title)
+	content := header + s.readWalkthroughTemplate()
 
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write WALKTHROUGH.md: %w", err)

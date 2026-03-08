@@ -16,6 +16,12 @@
 
 What is explicitly OUT of scope: -->
 
+## Acceptance Criteria
+
+<!-- This task is done when:
+- [ ] <observable behaviour or output>
+- [ ] <observable behaviour or output> -->
+
 ## Checklist
 
 <!-- Step-by-step implementation checklist.

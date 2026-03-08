@@ -3,6 +3,24 @@
 <!-- Concise summary of what was learned across all tasks.
      This is used as the knowledge excerpt in future lookups. -->
 
+## Implemented Features
+
+<!-- What was actually built or changed in this session?
+     For each feature/change, describe:
+     - Feature: <name>
+     - Spec: <what it does, key constraints, acceptance criteria>
+     - Files changed: <relevant files>
+     Example:
+     - Feature: Walkthrough template support
+       Spec: `logos task walkthrough` now reads scaffold from `.logosyncx/templates/walkthrough.md`,
+             falling back to hardcoded defaults if the file is missing.
+       Files changed: internal/task/store.go, cmd/init.go -->
+
+## Key Specification
+
+<!-- What spec, task description, or requirements drove this implementation?
+     Link to TASK.md sections, design docs, or paste the key constraints. -->
+
 ## Key Learnings
 
 <!-- Most important insights from the walkthroughs.

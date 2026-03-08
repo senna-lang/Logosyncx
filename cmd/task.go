@@ -330,8 +330,7 @@ ambiguous across plans.`,
 		statusStr, _ := cmd.Flags().GetString("status")
 		priorityStr, _ := cmd.Flags().GetString("priority")
 		assignee, _ := cmd.Flags().GetString("assignee")
-		force, _ := cmd.Flags().GetBool("force")
-		return runTaskUpdate(planPartial, name, statusStr, priorityStr, assignee, force)
+		return runTaskUpdate(planPartial, name, statusStr, priorityStr, assignee)
 	},
 }
 
@@ -342,10 +341,9 @@ func init() {
 	taskUpdateCmd.Flags().String("status", "", "New status (open, in_progress, done)")
 	taskUpdateCmd.Flags().String("priority", "", "New priority (high, medium, low)")
 	taskUpdateCmd.Flags().String("assignee", "", "New assignee")
-	taskUpdateCmd.Flags().Bool("force", false, "Skip confirmation prompt")
 }
 
-func runTaskUpdate(planPartial, nameOrPartial, statusStr, priorityStr, assignee string, force bool) error {
+func runTaskUpdate(planPartial, nameOrPartial, statusStr, priorityStr, assignee string) error {
 	if statusStr == "" && priorityStr == "" && assignee == "" {
 		return errors.New("provide at least one of --status, --priority, or --assignee")
 	}

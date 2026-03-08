@@ -887,6 +887,84 @@ func TestCreateWalkthroughScaffold_Idempotent(t *testing.T) {
 	}
 }
 
+func TestCreateWalkthroughScaffold_UsesTemplate(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default("test")
+	store := NewStore(dir, &cfg)
+
+	// Create .logosyncx/templates/walkthrough.md with custom content.
+	templatesDir := filepath.Join(dir, ".logosyncx", "templates")
+	if err := os.MkdirAll(templatesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	customTemplate := "## Custom Section\n\n<!-- Custom instructions. -->\n"
+	templatePath := filepath.Join(templatesDir, "walkthrough.md")
+	if err := os.WriteFile(templatePath, []byte(customTemplate), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	taskDir := filepath.Join(dir, "task-dir")
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	tk := &Task{Title: "Template Task", DirPath: taskDir}
+	if err := store.CreateWalkthroughScaffold(tk); err != nil {
+		t.Fatalf("CreateWalkthroughScaffold: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(taskDir, walkthroughFileName))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "# Walkthrough: Template Task") {
+		t.Errorf("expected title in scaffold, got: %q", content)
+	}
+	if !strings.Contains(content, "## Custom Section") {
+		t.Errorf("expected custom template section, got: %q", content)
+	}
+	if strings.Contains(content, "## What Was Done") {
+		t.Error("expected default sections to be absent when template exists")
+	}
+}
+
+func TestCreateWalkthroughScaffold_FallsBackWithoutTemplate(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default("test")
+	store := NewStore(dir, &cfg)
+
+	taskDir := filepath.Join(dir, "task-dir")
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	tk := &Task{Title: "Fallback Task", DirPath: taskDir}
+	if err := store.CreateWalkthroughScaffold(tk); err != nil {
+		t.Fatalf("CreateWalkthroughScaffold: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(taskDir, walkthroughFileName))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "## What Was Done") {
+		t.Error("expected fallback '## What Was Done' section")
+	}
+	if !strings.Contains(content, "## How It Was Done") {
+		t.Error("expected fallback '## How It Was Done' section")
+	}
+	if !strings.Contains(content, "## Gotchas & Lessons Learned") {
+		t.Error("expected fallback '## Gotchas & Lessons Learned' section")
+	}
+	if !strings.Contains(content, "## Reusable Patterns") {
+		t.Error("expected fallback '## Reusable Patterns' section")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // RebuildTaskIndex
 // ---------------------------------------------------------------------------

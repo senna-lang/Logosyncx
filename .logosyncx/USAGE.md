@@ -119,7 +119,10 @@ cat .logosyncx/templates/task.md
 # 1. Mark task done
 logos task update --plan <plan-filename> --name <task-name> --status done
 
-# 2. Write WALKTHROUGH.md (use Write tool)
+# 2. Read the walkthrough template
+cat .logosyncx/templates/walkthrough.md
+
+# 3. Write WALKTHROUGH.md body directly using the Write tool
 logos task walkthrough --plan <plan-filename> --name <task-name>
 ```
 
