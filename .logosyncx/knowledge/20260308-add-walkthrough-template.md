@@ -10,88 +10,57 @@ tags:
     - template
 ---
 
-<!-- SOURCE MATERIAL — read this, fill in the sections below, then remove this block. -->
-<!--
-## Plan: Add walkthrough template
 
-## Background
+## Summary
 
-Plans, tasks, and knowledge files all have customizable templates in `.logosyncx/templates/`. Walkthroughs (`WALKTHROUGH.md`) are the only document type without a template — their scaffold content is hardcoded in `internal/task/store.go`. Teams cannot customize walkthrough structure without modifying source code.
+Added `walkthrough.md` to the logos template system. `CreateWalkthroughScaffold()` now reads from `.logosyncx/templates/walkthrough.md` and falls back to hardcoded defaults when the file is missing. `logos init` creates the file automatically on new project setup.
 
-## Spec
+## Implemented Features
 
-Add `walkthrough.md` to the templates system:
+- `readWalkthroughTemplate()` helper in `internal/task/store.go` — reads `.logosyncx/templates/walkthrough.md`, falls back to `defaultWalkthroughBody` constant if missing.
+- `CreateWalkthroughScaffold()` refactored to use `header + s.readWalkthroughTemplate()`.
+- `logos init` now creates `templates/walkthrough.md` via the `defaultWalkthroughTemplate` constant in `cmd/init.go`.
+- `.logosyncx/templates/walkthrough.md` added to this repo.
 
-1. Add `defaultWalkthroughTemplate` constant to `cmd/init.go` and register it in the `logos init` templates map.
-2. Refactor `CreateWalkthroughScaffold()` in `internal/task/store.go` to read from `.logosyncx/templates/walkthrough.md`, falling back to hardcoded defaults if the file is missing.
-3. Add tests for template-driven and fallback scaffold creation.
-4. Create `.logosyncx/templates/walkthrough.md` in this repo immediately.
-5. Update `usageMD` in `cmd/init.go` and `.logosyncx/USAGE.md` to mention reading the walkthrough template.
+## Key Specification
 
-## Key Decisions
+All document types (plan, task, knowledge) had customizable templates in `.logosyncx/templates/`. Walkthroughs were the only exception — their scaffold was hardcoded in `store.go`. This prevented teams from customizing walkthrough structure without modifying source code. The fix adds `walkthrough.md` to the template system while maintaining backwards compatibility via a fallback constant.
 
-Decision: Fall back to hardcoded content when template file is missing. Rationale: Backwards compatibility — existing repos without `templates/walkthrough.md` should continue to work.
+## Key Learnings
 
-Decision: Template contains sections only (no title header). Rationale: Consistent with `task.md` and `plan.md` which also have no title line; the title is prepended by code as `# Walkthrough: <task title>`.
-
-## Notes
-
-Existing walkthroughs are unaffected. Only newly created scaffolds use the template.
-
----
-## Walkthrough: 001 Add walkthrough template support
-
-# Walkthrough: Add walkthrough template support
-
-<!-- Auto-generated when this task was marked done. -->
-<!-- Fill in each section before running logos distill. -->
-
-## What Was Done
-
-Added `walkthrough.md` to the logos template system. `CreateWalkthroughScaffold()` now reads from `.logosyncx/templates/walkthrough.md` and falls back to hardcoded defaults when the file is missing. `logos init` creates the file on new project setup.
-
-## How It Was Done
-
-1. Added `defaultWalkthroughTemplate` constant to `cmd/init.go` and registered it in the templates map so `logos init` creates `templates/walkthrough.md`.
-2. Added `defaultWalkthroughBody` fallback constant and `readWalkthroughTemplate()` helper to `internal/task/store.go`.
-3. Refactored `CreateWalkthroughScaffold()` to build content as `header + s.readWalkthroughTemplate()` instead of one large hardcoded format string.
-4. Added two tests: `TestCreateWalkthroughScaffold_UsesTemplate` and `TestCreateWalkthroughScaffold_FallsBackWithoutTemplate`.
-5. Created `.logosyncx/templates/walkthrough.md` in this repo.
-6. Updated `usageMD` in `cmd/init.go` and `.logosyncx/USAGE.md` to include "read walkthrough template" as step 2 of the task completion workflow.
-
-## Gotchas & Lessons Learned
-
-The `defaultWalkthroughBody` fallback in `store.go` must exactly match the sections in `defaultWalkthroughTemplate` in `cmd/init.go` — they're separate constants in separate packages. Keep them in sync when changing sections.
-
-The existing `TestCreateWalkthroughScaffold_CreatesFile` test (no template file in temp dir) exercises the fallback path automatically, so all existing tests remain valid without modification.
+- Template and fallback constants must be kept in sync across packages (`cmd/init.go` and `internal/task/store.go`). They are separate constants with no compile-time link — drift is a real risk.
+- Existing tests that create a scaffold without a template file exercise the fallback path automatically. No test changes needed for the fallback coverage.
 
 ## Reusable Patterns
 
-Template-with-fallback pattern for scaffolds:
+Template-with-fallback pattern for any scaffold type:
+
 ```go
+// In internal/<pkg>/store.go
 func (s *Store) readXTemplate() string {
     p := filepath.Join(s.projectRoot, ".logosyncx", "templates", "x.md")
     data, err := os.ReadFile(p)
     if err != nil {
-        return defaultXBody // package-level fallback constant
+        return defaultXBody // fallback constant in same package
     }
     return string(data)
 }
 ```
-Register the template in `cmd/init.go` `defaultXTemplate` + templates map. The fallback constant lives in the `internal/` package for test independence.
--->
 
-## Summary
+Register the template in `cmd/init.go`:
+```go
+const defaultXTemplate = `## Section\n\n<!-- ... -->\n`
 
-## Implemented Features
+// in initTemplates map:
+"x.md": defaultXTemplate,
+```
 
-## Key Specification
-
-## Key Learnings
-
-## Reusable Patterns
+The fallback constant lives in the `internal/` package so tests remain independent of the project filesystem.
 
 ## Gotchas
+
+- `defaultWalkthroughBody` (in `store.go`) and `defaultWalkthroughTemplate` (in `cmd/init.go`) are separate constants in separate packages. Any section change must be applied to both.
+- Template file contains sections only — no title header. The title (`# Walkthrough: <task title>`) is prepended by `CreateWalkthroughScaffold()` in code, consistent with how `plan.md` and `task.md` templates work.
 
 ## Source Walkthroughs
 
