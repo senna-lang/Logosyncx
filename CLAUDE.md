@@ -175,8 +175,13 @@ Do NOT batch-create multiple tasks without filling the body for each one first.
    logos task create --plan <plan-slug> --title "..."
    ```
 2. **Run quality gates** (if code changed): `go test ./...`
-3. **Update task status:**
+3. **Write WALKTHROUGH.md, then mark done** — this order is enforced by the CLI:
    ```bash
+   # a. Read the template
+   cat .logosyncx/templates/walkthrough.md
+   # b. Write content into the task's WALKTHROUGH.md using the Write tool
+   #    (path: .logosyncx/tasks/<plan-slug>/<NNN-task-name>/WALKTHROUGH.md)
+   # c. Only after writing — mark done
    logos task update --name <name> --status done
    ```
 4. **Save this plan:**

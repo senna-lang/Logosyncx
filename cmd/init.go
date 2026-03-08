@@ -130,16 +130,25 @@ cat .logosyncx/templates/task.md
 
 ### Workflow for completing a task
 
-` + "```" + `
-# 1. Mark task done
-logos task update --plan <plan-filename> --name <task-name> --status done
+> **CRITICAL ORDER**: Write WALKTHROUGH.md content FIRST, then mark done.
+> ` + "`" + `logos task update --status done` + "`" + ` will FAIL if WALKTHROUGH.md has no real content.
 
-# 2. Read the walkthrough template
+` + "```" + `
+# 1. Read the walkthrough template
 cat .logosyncx/templates/walkthrough.md
 
-# 3. Write WALKTHROUGH.md body directly using the Write tool
-logos task walkthrough --plan <plan-filename> --name <task-name>
+# 2. Find the task's directory path
+logos task refer --name <task-name> | head -5
+
+# 3. Write WALKTHROUGH.md content using the Write tool
+#    Path: .logosyncx/tasks/<plan-slug>/<NNN-task-name>/WALKTHROUGH.md
+
+# 4. Only after writing content — mark done
+logos task update --plan <plan-filename> --name <task-name> --status done
 ` + "```" + `
+
+A line counts as "real content" if it is non-empty and does not start with ` + "`<!--`" + `.
+Scaffold-only files (all HTML comment blocks) will be rejected.
 
 ### Task commands
 
