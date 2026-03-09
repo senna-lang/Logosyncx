@@ -101,9 +101,9 @@ func (t *Task) ToJSON() TaskJSON {
 		Tags:        normalizeStrings(t.Tags),
 		Assignee:    t.Assignee,
 		CompletedAt: t.CompletedAt,
-		Blocked:  false, // store sets this during loadAll
-		CanStart: false, // store sets this during loadAll (open && !blocked)
-		Excerpt:  t.Excerpt,
+		Blocked:     false, // store sets this during loadAll
+		CanStart:    false, // store sets this during loadAll (open && !blocked)
+		Excerpt:     t.Excerpt,
 	}
 }
 
