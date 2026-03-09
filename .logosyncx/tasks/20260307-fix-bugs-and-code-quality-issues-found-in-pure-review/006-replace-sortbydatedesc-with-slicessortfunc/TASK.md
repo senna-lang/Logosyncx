@@ -3,11 +3,12 @@ id: t-59d4e3
 date: 2026-03-07T21:31:11.276656+09:00
 title: Replace sortByDateDesc with slices.SortFunc
 seq: 6
-status: open
+status: done
 priority: low
 plan: 20260307-fix-bugs-and-code-quality-issues-found-in-pure-review
 tags: []
 assignee: ""
+completed_at: 2026-03-09T21:38:35.6177+09:00
 ---
 
 ## What

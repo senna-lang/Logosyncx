@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -472,6 +473,7 @@ func (s *Store) RebuildTaskIndex() (int, error) {
 	for _, t := range tasks {
 		entry := FromTask(t)
 		entry.Blocked = IsBlocked(t, planGroups[t.Plan])
+		entry.CanStart = t.Status == StatusOpen && !entry.Blocked
 		if err := AppendTaskIndex(s.projectRoot, entry); err != nil {
 			return 0, fmt.Errorf("append task index entry for %s: %w", t.DirPath, err)
 		}
@@ -672,9 +674,7 @@ func walkthroughHasContent(path string) bool {
 
 // sortByDateDesc sorts tasks newest-first in-place.
 func sortByDateDesc(tasks []*Task) {
-	for i := 1; i < len(tasks); i++ {
-		for j := i; j > 0 && tasks[j].Date.After(tasks[j-1].Date); j-- {
-			tasks[j], tasks[j-1] = tasks[j-1], tasks[j]
-		}
-	}
+	slices.SortFunc(tasks, func(a, b *Task) int {
+		return b.Date.Compare(a.Date)
+	})
 }

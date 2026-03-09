@@ -3,11 +3,12 @@ id: t-19afa0
 date: 2026-03-07T21:42:40.649994+09:00
 title: Add can_start field to task ls output
 seq: 8
-status: open
+status: done
 priority: low
 plan: 20260307-fix-bugs-and-code-quality-issues-found-in-pure-review
 tags: []
 assignee: ""
+completed_at: 2026-03-09T21:38:35.64161+09:00
 ---
 
 ## What

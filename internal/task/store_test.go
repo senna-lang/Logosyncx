@@ -1401,3 +1401,81 @@ func TestStore_UpdateFields_Done_AutoPushDisabled_NoCommit(t *testing.T) {
 		t.Fatalf("UpdateFields with auto_push=false: %v", err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Task 008: can_start field in TaskJSON
+// ---------------------------------------------------------------------------
+
+func TestStore_RebuildTaskIndex_SetsCanStart(t *testing.T) {
+	dir, store := setupStore(t)
+
+	// Create an open task with no dependencies — can_start should be true.
+	createTask(t, store, "20260304-auth", "Open task", "open", "medium", nil)
+
+	// Create a dependency task that is open.
+	dep := createTask(t, store, "20260304-auth", "Dep task", "open", "medium", nil)
+
+	// Create a task that depends on dep — blocked, so can_start=false.
+	blocked := &Task{
+		Title:     "Blocked task",
+		Plan:      "20260304-auth",
+		DependsOn: []int{dep.Seq},
+	}
+	_, err := store.Create(blocked)
+	if err != nil {
+		t.Fatalf("Create blocked task: %v", err)
+	}
+
+	_, err = store.RebuildTaskIndex()
+	if err != nil {
+		t.Fatalf("RebuildTaskIndex: %v", err)
+	}
+
+	entries, err := ReadAllTaskIndex(dir)
+	if err != nil {
+		t.Fatalf("ReadAllTaskIndex: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+
+	byTitle := make(map[string]TaskJSON)
+	for _, e := range entries {
+		byTitle[e.Title] = e
+	}
+
+	if !byTitle["Open task"].CanStart {
+		t.Error("open unblocked task: expected can_start=true")
+	}
+	if !byTitle["Dep task"].CanStart {
+		t.Error("dep task (open, no deps): expected can_start=true")
+	}
+	if byTitle["Blocked task"].CanStart {
+		t.Error("blocked task: expected can_start=false")
+	}
+}
+
+func TestStore_RebuildTaskIndex_DoneTask_CanStartFalse(t *testing.T) {
+	dir, store := setupStore(t)
+	tk := createTask(t, store, "20260304-auth", "Done task", "open", "medium", nil)
+
+	// Write walkthrough content and mark done.
+	wtPath := filepath.Join(tk.DirPath, walkthroughFileName)
+	if err := os.WriteFile(wtPath, []byte("# Walkthrough\n\nContent.\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := store.UpdateFields("", "done-task", map[string]string{"status": "done"}); err != nil {
+		t.Fatalf("UpdateFields: %v", err)
+	}
+
+	entries, err := ReadAllTaskIndex(dir)
+	if err != nil {
+		t.Fatalf("ReadAllTaskIndex: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].CanStart {
+		t.Error("done task: expected can_start=false")
+	}
+}

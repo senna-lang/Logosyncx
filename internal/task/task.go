@@ -63,7 +63,7 @@ type Task struct {
 }
 
 // TaskJSON is the shape used for --json output and the task-index.jsonl.
-// It includes all frontmatter fields plus the derived DirPath, Blocked, and Excerpt.
+// It includes all frontmatter fields plus the derived DirPath, Blocked, CanStart, and Excerpt.
 type TaskJSON struct {
 	ID          string     `json:"id"`
 	DirPath     string     `json:"dir_path"`
@@ -78,7 +78,11 @@ type TaskJSON struct {
 	Assignee    string     `json:"assignee"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 	Blocked     bool       `json:"blocked"`
-	Excerpt     string     `json:"excerpt"`
+	// CanStart is true when the task is open and not blocked by unfinished dependencies.
+	// Agents can use this to identify immediately actionable tasks without reasoning
+	// about the dependency graph themselves.
+	CanStart bool   `json:"can_start"`
+	Excerpt  string `json:"excerpt"`
 }
 
 // ToJSON converts a Task to its JSON-output representation.
@@ -97,14 +101,15 @@ func (t *Task) ToJSON() TaskJSON {
 		Tags:        normalizeStrings(t.Tags),
 		Assignee:    t.Assignee,
 		CompletedAt: t.CompletedAt,
-		Blocked:     false, // store sets this during loadAll
-		Excerpt:     t.Excerpt,
+		Blocked:  false, // store sets this during loadAll
+		CanStart: false, // store sets this during loadAll (open && !blocked)
+		Excerpt:  t.Excerpt,
 	}
 }
 
 // FromTask converts a *Task to TaskJSON (package-level function form of ToJSON).
-// Nil slices are normalised to empty slices. Blocked is always false here;
-// the store sets it during loadAll after evaluating depends_on.
+// Nil slices are normalised to empty slices. Blocked and CanStart are always false here;
+// the store sets them during loadAll after evaluating depends_on.
 func FromTask(t *Task) TaskJSON {
 	return t.ToJSON()
 }

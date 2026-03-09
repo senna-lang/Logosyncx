@@ -638,16 +638,20 @@ func walkthroughFillStatus(path string) string {
 // printTaskTable writes a human-readable tab-aligned task table to stdout.
 func printTaskTable(entries []task.TaskJSON) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "SEQ\tDATE\tTITLE\tSTATUS\tPRIORITY\tPLAN")
-	fmt.Fprintln(w, "---\t----\t-----\t------\t--------\t----")
+	fmt.Fprintln(w, "SEQ\tDATE\tTITLE\tSTATUS\tPRIORITY\tSTART\tPLAN")
+	fmt.Fprintln(w, "---\t----\t-----\t------\t--------\t-----\t----")
 	for _, e := range entries {
 		date := e.Date.Format("2006-01-02")
 		planName := e.Plan
 		if planName == "" {
 			planName = "-"
 		}
-		fmt.Fprintf(w, "%03d\t%s\t%s\t%s\t%s\t%s\n",
-			e.Seq, date, e.Title, string(e.Status), string(e.Priority), planName)
+		canStart := " "
+		if e.CanStart {
+			canStart = "✓"
+		}
+		fmt.Fprintf(w, "%03d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			e.Seq, date, e.Title, string(e.Status), string(e.Priority), canStart, planName)
 	}
 	return w.Flush()
 }

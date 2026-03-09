@@ -180,11 +180,9 @@ func filterTag(entries []index.Entry, tag string) []index.Entry {
 
 // sortByDateDesc sorts entries newest-first (in-place).
 func sortByDateDesc(entries []index.Entry) {
-	for i := 1; i < len(entries); i++ {
-		for j := i; j > 0 && entries[j].Date.After(entries[j-1].Date); j-- {
-			entries[j], entries[j-1] = entries[j-1], entries[j]
-		}
-	}
+	slices.SortFunc(entries, func(a, b index.Entry) int {
+		return b.Date.Compare(a.Date)
+	})
 }
 
 // --- helpers -----------------------------------------------------------------

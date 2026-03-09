@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/senna-lang/logosyncx/internal/gitutil"
@@ -174,6 +175,9 @@ func resolveDependsOn(partials []string, allPlans []plan.Plan) ([]string, error)
 
 // relPath returns the path of target relative to base, falling back to target.
 func relPath(base, target string) (string, error) {
-	rel := strings.TrimPrefix(target, base+"/")
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return target, err
+	}
 	return rel, nil
 }
