@@ -191,8 +191,8 @@ func (s *Store) Create(t *Task) (string, error) {
 		_ = gitutil.Add(s.projectRoot, taskPath)
 	}
 
-	// Best-effort index append.
-	_ = AppendTaskIndex(s.projectRoot, FromTask(t))
+	// Best-effort index rebuild (full rebuild for consistency).
+	_, _ = s.RebuildTaskIndex()
 	if s.cfg.Git.AutoPush {
 		_ = gitutil.Add(s.projectRoot, TaskIndexFilePath(s.projectRoot))
 	}
@@ -254,6 +254,8 @@ func (s *Store) UpdateFields(planPartial, nameOrPartial string, fields map[strin
 		return err
 	}
 
+	transitionedToDone := false
+
 	for k, v := range fields {
 		switch k {
 		case "status":
@@ -274,10 +276,15 @@ func (s *Store) UpdateFields(planPartial, nameOrPartial string, fields map[strin
 			if newStatus == StatusDone && t.Status != StatusDone {
 				wPath := filepath.Join(t.DirPath, walkthroughFileName)
 				if !walkthroughHasContent(wPath) {
-					return fmt.Errorf("WALKTHROUGH.md has no content: write WALKTHROUGH.md content first, then re-run")
+					relWPath, relErr := filepath.Rel(s.projectRoot, wPath)
+					if relErr != nil {
+						relWPath = wPath
+					}
+					return fmt.Errorf("WALKTHROUGH.md has no content: write content to\n  %s\nthen re-run", relWPath)
 				}
 				now := time.Now()
 				t.CompletedAt = &now
+				transitionedToDone = true
 			}
 
 			t.Status = newStatus
@@ -323,6 +330,18 @@ func (s *Store) UpdateFields(planPartial, nameOrPartial string, fields map[strin
 	_, _ = s.RebuildTaskIndex()
 	if s.cfg.Git.AutoPush {
 		_ = gitutil.Add(s.projectRoot, TaskIndexFilePath(s.projectRoot))
+	}
+
+	// Auto commit+push on done transition when auto_push is enabled.
+	if transitionedToDone && s.cfg.Git.AutoPush {
+		commitMsg := fmt.Sprintf("logos: mark task done: %s", t.Title)
+		if err := gitutil.Commit(s.projectRoot, commitMsg); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: git commit failed: %v\n", err)
+		} else {
+			if err := gitutil.Push(s.projectRoot); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: git push failed: %v\n", err)
+			}
+		}
 	}
 
 	return nil

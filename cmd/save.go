@@ -9,6 +9,7 @@ import (
 
 	"github.com/senna-lang/logosyncx/internal/gitutil"
 	"github.com/senna-lang/logosyncx/internal/project"
+	"github.com/senna-lang/logosyncx/pkg/config"
 	"github.com/senna-lang/logosyncx/pkg/index"
 	"github.com/senna-lang/logosyncx/pkg/plan"
 	"github.com/spf13/cobra"
@@ -54,6 +55,11 @@ func runSave(topic string, tags []string, agent string, related []string, depend
 		return err
 	}
 
+	cfg, err := config.Load(root)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
 	// Load existing plans to resolve --depends-on partial matches.
 	allPlans, err := plan.LoadAll(root)
 	if err != nil {
@@ -97,15 +103,9 @@ func runSave(topic string, tags []string, agent string, related []string, depend
 	rel, _ := relPath(root, savedPath)
 	fmt.Printf("✓ Created plan: %s\n", rel)
 
-	// Reload the plan from disk so Parse fills Excerpt, Filename, etc.
-	saved, loadErr := plan.LoadFile(savedPath)
-	if loadErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not load saved plan for indexing (%v)\n", loadErr)
-	} else {
-		entry := index.FromPlan(saved, append(allPlans, saved))
-		if indexErr := index.Append(root, entry); indexErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not update index (%v) — run `logos sync` to rebuild\n", indexErr)
-		}
+	// Rebuild the full plan index so logos ls reflects the new plan immediately.
+	if _, indexErr := index.Rebuild(root, cfg.Plans.ExcerptSection); indexErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not rebuild index (%v) — run `logos sync` to rebuild\n", indexErr)
 	}
 
 	// Stage with git (best-effort).

@@ -1316,3 +1316,88 @@ func TestCreate_DependsOn_ValidSeq_Succeeds(t *testing.T) {
 		t.Errorf("expected no error for valid depends_on seq, got: %v", err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Task 3: WALKTHROUGH.md path in done-transition error message
+// ---------------------------------------------------------------------------
+
+func TestStore_UpdateFields_Done_ErrorIncludesWalkthroughPath(t *testing.T) {
+	dir, store := setupStore(t)
+	createTask(t, store, "20260304-auth", "Path test task", "open", "medium", nil)
+
+	err := store.UpdateFields("", "path-test-task", map[string]string{"status": "done"})
+	if err == nil {
+		t.Fatal("expected error when WALKTHROUGH.md has no content, got nil")
+	}
+
+	// Error must contain the relative path to WALKTHROUGH.md.
+	if !strings.Contains(err.Error(), ".logosyncx") {
+		t.Errorf("expected relative path containing '.logosyncx' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "WALKTHROUGH.md") {
+		t.Errorf("expected 'WALKTHROUGH.md' in error, got: %v", err)
+	}
+
+	// Path should be relative (not absolute — should not start with dir prefix).
+	if strings.Contains(err.Error(), dir) {
+		t.Errorf("expected relative path in error, got absolute path: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 1: auto git commit+push when auto_push enabled (done transition)
+// ---------------------------------------------------------------------------
+
+func TestStore_UpdateFields_Done_AutoPush_CommitsAndPushes(t *testing.T) {
+	_, store := setupStore(t)
+
+	// Enable auto_push in config.
+	cfg := config.Default("test-project")
+	cfg.Git.AutoPush = true
+	store.cfg = &cfg
+
+	tk := createTask(t, store, "20260304-auth", "Auto push task", "open", "medium", nil)
+
+	// Write real content into WALKTHROUGH.md.
+	wtPath := filepath.Join(tk.DirPath, walkthroughFileName)
+	if err := os.WriteFile(wtPath, []byte("# Walkthrough\n\nReal content.\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// UpdateFields should succeed — commit+push will fail (not a real git repo)
+	// but the function must not return an error (they are non-fatal warnings).
+	err := store.UpdateFields("", "auto-push-task", map[string]string{"status": "done"})
+	if err != nil {
+		t.Fatalf("UpdateFields with auto_push=true should succeed even if git fails: %v", err)
+	}
+
+	// Verify the task was actually marked done.
+	updated, err := store.Get("", "auto-push-task")
+	if err != nil {
+		t.Fatalf("Get after UpdateFields: %v", err)
+	}
+	if updated.Status != StatusDone {
+		t.Errorf("expected status=done, got %q", updated.Status)
+	}
+}
+
+func TestStore_UpdateFields_Done_AutoPushDisabled_NoCommit(t *testing.T) {
+	_, store := setupStore(t)
+
+	// Confirm auto_push is false by default.
+	if store.cfg.Git.AutoPush {
+		t.Fatal("auto_push should be false in default config")
+	}
+
+	tk := createTask(t, store, "20260304-auth", "No push task", "open", "medium", nil)
+
+	wtPath := filepath.Join(tk.DirPath, walkthroughFileName)
+	if err := os.WriteFile(wtPath, []byte("# Walkthrough\n\nReal content.\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Should succeed without any git operations.
+	if err := store.UpdateFields("", "no-push-task", map[string]string{"status": "done"}); err != nil {
+		t.Fatalf("UpdateFields with auto_push=false: %v", err)
+	}
+}
