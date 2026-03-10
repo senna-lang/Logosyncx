@@ -3,11 +3,12 @@ id: t-532ff1
 date: 2026-03-07T21:31:11.282971+09:00
 title: Fix AutoPush config naming and comment
 seq: 7
-status: open
+status: done
 priority: low
 plan: 20260307-fix-bugs-and-code-quality-issues-found-in-pure-review
 tags: []
 assignee: ""
+completed_at: 2026-03-10T19:47:11.853588+09:00
 ---
 
 ## What
